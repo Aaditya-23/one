@@ -1,0 +1,10 @@
+[package]
+name = "javascript"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bumpalo = {version = "3.16.0", features = ["boxed", "collections"]}
+compact_str = "0.8.1"
+doc = { path = "../doc" }
+macros = {path = "../macros"}
