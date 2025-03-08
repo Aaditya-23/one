@@ -1,30 +1,31 @@
-// pub fn format(code: String, extension: String, options: doc::Options) -> String {
-//     let doc = match extension.as_str() {
-//         ".js" => javascript::build_doc(code, options),
-//         "css" => panic!("Not implemented yet"),
-//         "html" => panic!("Not implemented yet"),
-//         _ => {
-//             panic!("Unsupported file extension: {}", extension);
-//         }
-//     };
+use bumpalo::{collections::Vec, Bump};
+use javascript::ast::Statement;
 
-//     let formatted_code = doc::print(doc);
+mod commands;
+mod doc_js;
+mod formatter;
 
-//     formatted_code
-// }
+pub fn format_js<'a>(arena: &'a Bump, code: &'a str, ast: Vec<'a, Statement<'a>>) {
+   let mut doc_builder: doc_js::Doc<'_> = doc_js::Doc::new(arena, code, ast);
+   let doc = doc_builder.build();
+}
 
-// #[cfg(test)]
-// mod tests {
-//     use std::fs::{read_to_string, write};
+#[cfg(test)]
+mod test {
+    use std::fs::read_to_string;
 
-//     use super::*;
+    use javascript::parser::Parser;
 
-//     #[test]
-//     fn test_format() {
-//         let code = read_to_string("./data/input.jsx").unwrap();
-//         let extension = ".js";
-//         let formatted_code = format(code, extension.to_string(), doc::Options::default());
+    use super::*;
 
-//         write("./data/output.js", formatted_code).unwrap();
-//     }
-// }
+    #[test]
+    fn test_format() {
+        let arena = Bump::new();
+        let code = read_to_string("../../data/input.js").unwrap();
+        let mut p = Parser::new(&arena, code.as_str());
+
+        let ast = p.parse();
+
+        format_js(&arena, code.as_str(), ast);
+    }
+}

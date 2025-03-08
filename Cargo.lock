@@ -49,6 +49,7 @@ version = "0.1.0"
 name = "formatter"
 version = "0.1.0"
 dependencies = [
+ "bumpalo",
  "doc",
  "javascript",
 ]
@@ -65,7 +66,6 @@ version = "0.1.0"
 dependencies = [
  "bumpalo",
  "compact_str",
- "doc",
  "macros",
 ]
 

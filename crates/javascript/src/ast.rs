@@ -8,9 +8,8 @@ pub trait Location {
 }
 
 #[derive(Debug, CloneIn)]
-pub struct Identifier<'a> {
+pub struct Identifier {
     pub start: u32,
-    pub name: &'a str,
     pub end: u32,
 }
 
@@ -61,7 +60,7 @@ pub struct AssignmentPattern<'a> {
 
 #[derive(Debug, CloneIn)]
 pub enum Pattern<'a> {
-    IdentifierPattern(Box<'a, Identifier<'a>>),
+    IdentifierPattern(Box<'a, Identifier>),
     ArrayPattern(Box<'a, ArrayPattern<'a>>),
     ObjectPattern(Box<'a, ObjectPattern<'a>>),
     AssignmentPattern(Box<'a, AssignmentPattern<'a>>),
@@ -72,6 +71,16 @@ pub enum VariableDeclarationKind {
     Const,
     Let,
     Var,
+}
+
+impl<'a> VariableDeclarationKind {
+    pub fn as_str(&self) -> &'a str {
+        match self {
+            Self::Const => "const",
+            Self::Let => "let",
+            Self::Var => "var",
+        }
+    }
 }
 
 #[derive(Debug, CloneIn)]
@@ -93,21 +102,18 @@ pub struct VariableDeclaration<'a> {
 #[derive(Debug, CloneIn)]
 pub struct NumericLiteral {
     pub start: u32,
-    pub value: f64,
     pub end: u32,
 }
 
 #[derive(Debug, CloneIn)]
-pub struct StringLiteral<'a> {
+pub struct StringLiteral {
     pub start: u32,
-    pub value: &'a str,
     pub end: u32,
 }
 
 #[derive(Debug, CloneIn)]
 pub struct BooleanLiteral {
     pub start: u32,
-    pub value: bool,
     pub end: u32,
 }
 
@@ -119,8 +125,8 @@ pub struct NullLiteral {
 
 #[derive(Debug, CloneIn)]
 pub enum IdentifierOrLiteral<'a> {
-    Identifier(Box<'a, Identifier<'a>>),
-    Literal(Box<'a, StringLiteral<'a>>),
+    Identifier(Box<'a, Identifier>),
+    Literal(Box<'a, StringLiteral>),
 }
 
 #[derive(Debug, CloneIn)]
@@ -361,9 +367,9 @@ pub struct TemplateLiteral<'a> {
 
 #[derive(Debug, Location, CloneIn)]
 pub enum Expression<'a> {
-    Identifier(Box<'a, Identifier<'a>>),
+    Identifier(Box<'a, Identifier>),
     NumericLiteral(Box<'a, NumericLiteral>),
-    StringLiteral(Box<'a, StringLiteral<'a>>),
+    StringLiteral(Box<'a, StringLiteral>),
     BooleanLiteral(Box<'a, BooleanLiteral>),
     NullLiteral(Box<'a, NullLiteral>),
     Import(Box<'a, Import>),
@@ -415,7 +421,7 @@ pub struct Function<'a> {
     pub start: u32,
     pub async_: bool,
     pub generator: bool,
-    pub id: Option<Identifier<'a>>,
+    pub id: Option<Identifier>,
     pub params: Vec<'a, FunctionParams<'a>>,
     pub body: Block<'a>,
     pub end: u32,
@@ -478,7 +484,7 @@ pub enum ClassBody<'a> {
 #[derive(Debug, CloneIn)]
 pub struct Class<'a> {
     pub start: u32,
-    pub id: Option<Identifier<'a>>,
+    pub id: Option<Identifier>,
     pub super_class: Option<Expression<'a>>,
     pub body: Vec<'a, ClassBody<'a>>,
     pub end: u32,
@@ -488,36 +494,36 @@ pub struct Class<'a> {
 pub struct ImportSpecifier<'a> {
     pub start: u32,
     pub imported: IdentifierOrLiteral<'a>,
-    pub local: Option<Identifier<'a>>,
+    pub local: Option<Identifier>,
     pub end: u32,
 }
 
 #[derive(Debug, CloneIn)]
-pub struct ImportDefaultSpecifier<'a> {
+pub struct ImportDefaultSpecifier {
     pub start: u32,
-    pub local: Identifier<'a>,
+    pub local: Identifier,
     pub end: u32,
 }
 
 #[derive(Debug, CloneIn)]
-pub struct ImportNamespaceSpecifier<'a> {
+pub struct ImportNamespaceSpecifier {
     pub start: u32,
-    pub local: Identifier<'a>,
+    pub local: Identifier,
     pub end: u32,
 }
 
 #[derive(Debug, CloneIn)]
 pub enum ImportSpecifierType<'a> {
     ImportSpecifier(Box<'a, ImportSpecifier<'a>>),
-    ImportDefaultSpecifier(Box<'a, ImportDefaultSpecifier<'a>>),
-    ImportNamespaceSpecifier(Box<'a, ImportNamespaceSpecifier<'a>>),
+    ImportDefaultSpecifier(Box<'a, ImportDefaultSpecifier>),
+    ImportNamespaceSpecifier(Box<'a, ImportNamespaceSpecifier>),
 }
 
 #[derive(Debug, CloneIn)]
 pub struct ImportAttribute<'a> {
     pub start: u32,
     pub key: IdentifierOrLiteral<'a>,
-    pub value: StringLiteral<'a>,
+    pub value: StringLiteral,
     pub end: u32,
 }
 
@@ -525,16 +531,16 @@ pub struct ImportAttribute<'a> {
 pub struct ImportDeclaration<'a> {
     pub start: u32,
     pub specifiers: Vec<'a, ImportSpecifierType<'a>>,
-    pub source: StringLiteral<'a>,
+    pub source: StringLiteral,
     pub assertions: Vec<'a, ImportAttribute<'a>>,
     pub end: u32,
 }
 
 #[derive(Debug, CloneIn)]
-pub struct MetaProperty<'a> {
+pub struct MetaProperty {
     pub start: u32,
-    pub meta: Identifier<'a>,
-    pub property: Identifier<'a>,
+    pub meta: Identifier,
+    pub property: Identifier,
     pub end: u32,
 }
 
@@ -564,16 +570,16 @@ pub struct EmptyStatement {
 }
 
 #[derive(Debug, CloneIn)]
-pub struct BreakStatement<'a> {
+pub struct BreakStatement {
     pub start: u32,
-    pub label: Option<Identifier<'a>>,
+    pub label: Option<Identifier>,
     pub end: u32,
 }
 
 #[derive(Debug, CloneIn)]
-pub struct ContinueStatement<'a> {
+pub struct ContinueStatement {
     pub start: u32,
-    pub label: Option<Identifier<'a>>,
+    pub label: Option<Identifier>,
     pub end: u32,
 }
 
@@ -697,7 +703,7 @@ pub struct WithStatement<'a> {
 #[derive(Debug, CloneIn)]
 pub struct LabelledStatement<'a> {
     pub start: u32,
-    pub label: Identifier<'a>,
+    pub label: Identifier,
     pub body: Statement<'a>,
     pub end: u32,
 }
@@ -715,8 +721,8 @@ pub enum Statement<'a> {
     ExpressionStatement(Box<'a, ExpressionStatement<'a>>),
     BlockStatement(Box<'a, Block<'a>>),
     EmptyStatement(Box<'a, EmptyStatement>),
-    BreakStatement(Box<'a, BreakStatement<'a>>),
-    ContinueStatement(Box<'a, ContinueStatement<'a>>),
+    BreakStatement(Box<'a, BreakStatement>),
+    ContinueStatement(Box<'a, ContinueStatement>),
     DebuggerStatement(Box<'a, DebuggerStatement>),
     DoWhileLoop(Box<'a, DoWhileLoop<'a>>),
     WhileLoop(Box<'a, WhileLoop<'a>>),

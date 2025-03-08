@@ -1,3 +1,6 @@
+    use Kind::*;
+
+
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub enum Kind {
     // Comments
@@ -160,4 +163,15 @@ pub enum Kind {
     DollarCurly,
     RegexpPattern,
     RegexpFlag,
+}
+
+impl  Kind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            LineComment => "//",
+            Star => "*",
+            StarEqual => "*=",
+            _ => panic!("not implemented")
+        }
+    }
 }

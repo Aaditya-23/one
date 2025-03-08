@@ -163,14 +163,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_identifier(&mut self) -> Identifier<'a> {
+    pub fn parse_identifier(&mut self) -> Identifier {
         let start = self.token.start;
-        let name = self.get_token_value();
         self.bump();
 
         Identifier {
             start,
-            name,
             end: self.prev_token_end,
         }
     }
@@ -448,27 +446,24 @@ impl<'a> Parser<'a> {
     pub fn parse_numeric_literal(&mut self) -> Expression<'a> {
         let start = self.token.start;
 
-        let value = self.get_token_value().parse().unwrap();
+        // skip numeric literal
         self.bump();
 
         Expression::NumericLiteral(Box::new_in(
             NumericLiteral {
                 start,
-                value,
                 end: self.prev_token_end,
             },
             self.arena,
         ))
     }
 
-    pub fn parse_string_literal(&mut self) -> StringLiteral<'a> {
+    pub fn parse_string_literal(&mut self) -> StringLiteral {
         let start = self.token.start;
-        let value = self.get_token_value();
         self.bump();
 
         StringLiteral {
             start,
-            value,
             end: self.prev_token_end,
         }
     }
@@ -481,13 +476,11 @@ impl<'a> Parser<'a> {
 
     pub fn parse_boolean_literal(&mut self) -> Expression<'a> {
         let start = self.token.start;
-        let value = self.get_token_value().parse().unwrap();
         self.bump();
 
         Expression::BooleanLiteral(Box::new_in(
             BooleanLiteral {
                 start,
-                value,
                 end: self.prev_token_end,
             },
             self.arena,

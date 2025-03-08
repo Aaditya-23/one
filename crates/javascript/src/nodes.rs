@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use crate::tokenizer::Regex;
-
 pub trait DeclarationOperations {
     fn get_id(&self) -> Vec<Identifier>;
 }
@@ -797,7 +795,7 @@ pub mod expressions {
 
     #[derive(Debug, Clone)]
     pub struct Sequence {
-       pub expressions: Vec<Expression>,
+        pub expressions: Vec<Expression>,
     }
 
     impl Sequence {
@@ -811,7 +809,7 @@ pub mod expressions {
         Expression(Box<Expression>),
         Block(statements::Block),
     }
-    
+
     #[derive(Debug, Clone)]
     pub struct ArrowFunction {
         expression: bool,
@@ -822,7 +820,11 @@ pub mod expressions {
     }
 
     impl ArrowFunction {
-        pub fn new(params: Vec<patterns::Pattern>, body: ArrowFunctionBody, is_async: bool) -> Self {
+        pub fn new(
+            params: Vec<patterns::Pattern>,
+            body: ArrowFunctionBody,
+            is_async: bool,
+        ) -> Self {
             Self {
                 expression: false,
                 generator: false,
@@ -852,9 +854,9 @@ pub mod expressions {
 
     #[derive(Debug, Clone)]
     pub struct Logical {
-       pub operator: String,
-       pub left: Box<Expression>,
-       pub right: Box<Expression>,
+        pub operator: String,
+        pub left: Box<Expression>,
+        pub right: Box<Expression>,
     }
 
     impl Logical {
@@ -927,7 +929,6 @@ pub mod expressions {
             }
         }
     }
-
 
     #[derive(Debug, Clone)]
     pub struct MetaProperty {
