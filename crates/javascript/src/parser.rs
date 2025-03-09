@@ -30,6 +30,7 @@ pub struct Parser<'a> {
     lexer: Tokenizer<'a>,
     token: Token,
     prev_token_end: u32,
+    in_paren: bool,
     arena: &'a Bump,
 }
 
@@ -170,6 +171,7 @@ impl<'a> Parser<'a> {
         Identifier {
             start,
             end: self.prev_token_end,
+            parenthesized: self.in_paren,
         }
     }
 
@@ -548,6 +550,7 @@ impl<'a> Parser<'a> {
                 self.arena,
             ))
         } else {
+            self.in_paren = true;
             let exp = self.parse_assignment_expression();
 
             if self.kind(Kind::Comma) {
@@ -577,6 +580,8 @@ impl<'a> Parser<'a> {
 
                         let (body, is_exp) = self.parse_arrow_function_body();
 
+                        self.in_paren = false;
+
                         return Expression::ArrowFunctionExpression(Box::new_in(
                             ArrowFunction {
                                 start,
@@ -594,6 +599,7 @@ impl<'a> Parser<'a> {
                 }
 
                 self.expect(Kind::ParenC);
+                self.in_paren = false;
 
                 if self.kind(Kind::Arrow) {
                     self.bump();
@@ -626,12 +632,14 @@ impl<'a> Parser<'a> {
                             start,
                             expressions,
                             end: self.prev_token_end,
+                            parenthesized: true,
                         },
                         self.arena,
                     ))
                 }
             } else {
                 self.expect(Kind::ParenC);
+                self.in_paren = false;
 
                 if self.kind(Kind::Arrow) {
                     self.bump();
@@ -724,6 +732,7 @@ impl<'a> Parser<'a> {
                 start,
                 elements,
                 end: self.prev_token_end,
+                parenthesized: self.in_paren,
             },
             self.arena,
         ))
@@ -754,7 +763,17 @@ impl<'a> Parser<'a> {
         let (is_computed, is_shorthand, is_method, kind, value);
         let key;
 
-        if matches!(self.token.kind, Kind::Identifier |Kind::Case | Kind::Default |Kind::In |Kind::As |Kind::Number | Kind::String | Kind::From) {
+        if matches!(
+            self.token.kind,
+            Kind::Identifier
+                | Kind::Case
+                | Kind::Default
+                | Kind::In
+                | Kind::As
+                | Kind::Number
+                | Kind::String
+                | Kind::From
+        ) {
             key = Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
             is_computed = false;
         } else if self.kind(Kind::BracketO) {
@@ -763,7 +782,10 @@ impl<'a> Parser<'a> {
             self.expect(Kind::BracketC);
             is_computed = true
         } else {
-            panic!("invalid token kind {:?} {}", self.token.kind, self.lexer.line_number);
+            panic!(
+                "invalid token kind {:?} {}",
+                self.token.kind, self.lexer.line_number
+            );
         }
 
         if self.kind(Kind::Colon) {
@@ -833,6 +855,7 @@ impl<'a> Parser<'a> {
                 start,
                 properties,
                 end: self.prev_token_end,
+                parenthesized: self.in_paren,
             },
             self.arena,
         ))
@@ -860,6 +883,7 @@ impl<'a> Parser<'a> {
             ThisExpression {
                 start,
                 end: self.prev_token_end,
+                parenthesized: self.in_paren,
             },
             self.arena,
         ))
@@ -1088,6 +1112,7 @@ impl<'a> Parser<'a> {
                 pattern,
                 flag,
                 end,
+                parenthesized: self.in_paren,
             },
             self.arena,
         ))
@@ -1154,6 +1179,7 @@ impl<'a> Parser<'a> {
                 expressions,
                 quasis,
                 end: self.prev_token_end,
+                parenthesized: self.in_paren,
             },
             self.arena,
         ))
@@ -1183,6 +1209,7 @@ impl<'a> Parser<'a> {
                     callee,
                     arguments,
                     end: self.prev_token_end,
+                    parenthesized: self.in_paren,
                 },
                 self.arena,
             ))
@@ -1202,6 +1229,7 @@ impl<'a> Parser<'a> {
                 start,
                 argument,
                 end: self.prev_token_end,
+                parenthesized: self.in_paren,
             },
             self.arena,
         ))
@@ -1471,6 +1499,7 @@ impl<'a> Parser<'a> {
                     argument,
                     prefix: true,
                     end: self.prev_token_end,
+                    parenthesized: self.in_paren,
                 },
                 self.arena,
             ))
@@ -1490,6 +1519,7 @@ impl<'a> Parser<'a> {
                         argument: exp,
                         prefix: false,
                         end: self.prev_token_end,
+                        parenthesized: self.in_paren,
                     },
                     self.arena,
                 ))
@@ -1512,6 +1542,7 @@ impl<'a> Parser<'a> {
                     argument: self.parse_unary_expression(),
                     prefix: true,
                     end: self.prev_token_end,
+                    parenthesized: self.in_paren,
                 },
                 self.arena,
             ))
@@ -1537,6 +1568,7 @@ impl<'a> Parser<'a> {
                             operator: BinaryOperator::Exponentiation,
                             right,
                             end: self.prev_token_end,
+                            parenthesized: self.in_paren,
                         },
                         self.arena,
                     ))
@@ -1562,6 +1594,7 @@ impl<'a> Parser<'a> {
                         operator: self.get_logical_operator(operator),
                         right,
                         end: self.prev_token_end,
+                        parenthesized: self.in_paren,
                     },
                     self.arena,
                 ))
@@ -1573,6 +1606,7 @@ impl<'a> Parser<'a> {
                         operator: self.get_binary_operator(operator),
                         right,
                         end: self.prev_token_end,
+                        parenthesized: self.in_paren,
                     },
                     self.arena,
                 ))
@@ -1598,6 +1632,7 @@ impl<'a> Parser<'a> {
                     consequent,
                     alternate,
                     end: self.prev_token_end,
+                    parenthesized: self.in_paren,
                 },
                 self.arena,
             ))
@@ -1682,6 +1717,7 @@ impl<'a> Parser<'a> {
                     left,
                     right: self.parse_assignment_expression(),
                     end: self.prev_token_end,
+                    parenthesized: self.in_paren,
                 },
                 self.arena,
             ))
@@ -2462,6 +2498,7 @@ impl<'a> Parser<'a> {
                     start,
                     expressions,
                     end: self.prev_token_end,
+                    parenthesized: true,
                 },
                 self.arena,
             ));
@@ -2541,6 +2578,7 @@ impl<'a> Parser<'a> {
             lexer,
             token,
             prev_token_end: 0,
+            in_paren: false,
             arena,
         }
     }

@@ -11,6 +11,7 @@ pub trait Location {
 pub struct Identifier {
     pub start: u32,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -140,6 +141,7 @@ pub struct ArrayExpression<'a> {
     pub start: u32,
     pub elements: Vec<'a, Expression<'a>>,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -172,6 +174,7 @@ pub struct ObjectExpression<'a> {
     pub start: u32,
     pub properties: Vec<'a, ObjectExpressionPropertyKind<'a>>,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -208,6 +211,7 @@ pub struct BinaryExpression<'a> {
     pub operator: BinaryOperator,
     pub right: Expression<'a>,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -223,6 +227,7 @@ pub struct LogicalExpression<'a> {
     pub operator: LogicalOperator,
     pub right: Expression<'a>,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -255,6 +260,7 @@ pub struct AssignmentExpression<'a> {
     pub operator: AssignmentOperator,
     pub right: Expression<'a>,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -269,6 +275,7 @@ pub struct AwaitExpression<'a> {
     pub start: u32,
     pub argument: Expression<'a>,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -281,6 +288,7 @@ pub struct Elision {
 pub struct ThisExpression {
     pub start: u32,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -289,6 +297,7 @@ pub struct NewExpression<'a> {
     pub callee: Expression<'a>,
     pub arguments: Vec<'a, Expression<'a>>,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -304,6 +313,7 @@ pub struct UpdateExpression<'a> {
     pub argument: Expression<'a>,
     pub prefix: bool,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -324,6 +334,7 @@ pub struct UnaryExpression<'a> {
     pub argument: Expression<'a>,
     pub prefix: bool,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -333,6 +344,7 @@ pub struct ConditionalExpression<'a> {
     pub alternate: Expression<'a>,
     pub consequent: Expression<'a>,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -340,6 +352,7 @@ pub struct SequenceExpression<'a> {
     pub start: u32,
     pub expressions: Vec<'a, Expression<'a>>,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -348,6 +361,7 @@ pub struct Regexp<'a> {
     pub pattern: &'a str,
     pub flag: &'a str,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, CloneIn)]
@@ -363,6 +377,7 @@ pub struct TemplateLiteral<'a> {
     pub quasis: Vec<'a, TemplateElement>,
     pub expressions: Vec<'a, Expression<'a>>,
     pub end: u32,
+    pub parenthesized: bool,
 }
 
 #[derive(Debug, Location, CloneIn)]

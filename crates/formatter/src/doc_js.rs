@@ -1,6 +1,11 @@
 use bumpalo::{collections::Vec, Bump};
 use javascript::ast::{
-    ArrayExpression, ArrayPattern, AssignmentExpression, BinaryExpression, BooleanLiteral, Expression::{self, *}, Identifier, Import, NullLiteral, NumericLiteral, ObjectExpression, ObjectExpressionPropertyKind, ObjectPattern, ObjectPatternPropertyKind, Pattern, Statement::{self, *}, StringLiteral, VariableDeclaration, VariableDeclarator
+    ArrayExpression, ArrayPattern, AssignmentExpression, BinaryExpression, BooleanLiteral,
+    Expression::{self, *},
+    Identifier, Import, NullLiteral, NumericLiteral, ObjectExpression,
+    ObjectExpressionPropertyKind, ObjectPattern, ObjectPatternPropertyKind, Pattern,
+    Statement::{self, *},
+    StringLiteral, VariableDeclaration, VariableDeclarator,
 };
 
 use crate::{
@@ -326,7 +331,7 @@ impl<'a> Doc<'a> {
     fn build_from_binary_exp(&self, exp: &BinaryExpression<'a>) -> Command<'a> {
         todo!()
     }
-    
+
     fn build_from_expression(&self, exp: &Expression<'a>) -> Command<'a> {
         use Expression::*;
 
