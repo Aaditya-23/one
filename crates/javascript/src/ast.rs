@@ -204,6 +204,38 @@ pub enum BinaryOperator {
     Instanceof,
 }
 
+impl<'a> BinaryOperator {
+    pub fn as_str(&self) -> &'a str {
+        use BinaryOperator::*;
+
+        match self {
+            Equality => "==",
+            Inequality => "!=",
+            StrictEquality => "===",
+            StrictInequality => "!==",
+            LessThan => "<",
+            LessThanOrEqual => "<=",
+            GreaterThan => ">",
+            GreaterThanOrEqual => ">=",
+            LeftShift => "<<",
+            RightShift => ">>",
+            UnsignedRightShift => ">>>",
+            Add => "+",
+            Subtract => "-",
+            Multiply => "*",
+            Exponentiation => "**",
+            Divide => "/",
+            Mod => "%",
+            BitwiseAND => "&",
+            BitwiseOR => "|",
+            BitwiseXOR => "^",
+            Coalescing => "??",
+            In => "in",
+            Instanceof => "instanceof",
+        }
+    }
+}
+
 #[derive(Debug, CloneIn)]
 pub struct BinaryExpression<'a> {
     pub start: u32,
@@ -218,6 +250,15 @@ pub struct BinaryExpression<'a> {
 pub enum LogicalOperator {
     And,
     Or,
+}
+
+impl LogicalOperator {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::And => "&&",
+            Self::Or => "||",
+        }
+    }
 }
 
 #[derive(Debug, CloneIn)]
@@ -251,6 +292,28 @@ pub enum AssignmentOperator {
     BitwiseOR,
     BitwiseAND,
     BitwiseXOR,
+}
+
+impl<'a> AssignmentOperator {
+    pub fn as_str(&self) -> &'a str {
+        use AssignmentOperator::*;
+
+        match self {
+            Equal => "=",
+            Plus => "+=",
+            Minus => "-=",
+            Multiply => "*=",
+            Divide => "/=",
+            Mod => "%=",
+            Exponentiation => "**=",
+            LeftShift => "<<=",
+            RightShift => ">>=",
+            UnsignedRightShift => ">>>=",
+            BitwiseOR => "|=",
+            BitwiseAND => "&=",
+            BitwiseXOR => "^=",
+        }
+    }
 }
 
 #[derive(Debug, CloneIn)]
@@ -306,6 +369,15 @@ pub enum UpdateOperator {
     Decrement,
 }
 
+impl<'a> UpdateOperator {
+    pub fn as_str(&self) -> &'a str {
+        match self {
+            Self::Increment => "++",
+            Self::Decrement => "--",
+        }
+    }
+}
+
 #[derive(Debug, CloneIn)]
 pub struct UpdateExpression<'a> {
     pub start: u32,
@@ -325,6 +397,22 @@ pub enum UnaryOperator {
     Delete,
     Typeof,
     Void,
+}
+
+impl<'a> UnaryOperator {
+    pub fn as_str(&self) -> &'a str {
+        use UnaryOperator::*;
+
+        match self {
+            Plus => "+",
+            Minus => "-",
+            Tilde => "~",
+            Bang => "!",
+            Delete => "delete",
+            Typeof => "typeof",
+            Void => "void",
+        }
+    }
 }
 
 #[derive(Debug, CloneIn)]
@@ -406,8 +494,8 @@ pub enum Expression<'a> {
     SequenceExpression(Box<'a, SequenceExpression<'a>>),
     RegularExpression(Box<'a, Regexp<'a>>),
     TemplateLiteral(Box<'a, TemplateLiteral<'a>>),
-    SpreadElement(Box<'a, SpreadElement<'a>>),
     AwaitExpression(Box<'a, AwaitExpression<'a>>),
+    SpreadElement(Box<'a, SpreadElement<'a>>),
     Elision(Box<'a, Elision>),
 }
 

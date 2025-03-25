@@ -6,4 +6,3 @@ edition = "2021"
 [dependencies]
 bumpalo = {version = "3.16.0", features = ["boxed", "collections"]}
 javascript = {path = "../javascript"}
-doc = {path = "../doc"}
