@@ -1,10 +1,9 @@
-use std::ops::DerefMut;
-
-use bumpalo::{collections::Vec as BumpVec, Bump};
+use bumpalo::collections::vec;
 
 use crate::array;
 
 use super::commands::{Command::*, *};
+use std::ops::DerefMut;
 
 pub struct FormatterOptions {
     width: usize,
@@ -17,7 +16,7 @@ pub struct FormatterOptions {
 impl Default for FormatterOptions {
     fn default() -> Self {
         Self {
-            width: 80,
+            width: 50,
             tabs: false,
             indent_size: 2,
             semicolons: true,
@@ -26,68 +25,63 @@ impl Default for FormatterOptions {
     }
 }
 
-pub struct Printer<'a> {
-    arena: &'a Bump,
+pub struct Printer {
     opts: FormatterOptions,
 }
 
-impl<'a, 'b, 'c> Printer<'a> {
-    fn expand_join_cmd_inner(&self, doc: &mut BumpVec<'a, Command<'a>>) {
-        for cmd in doc.iter_mut() {
+impl Printer {
+    fn expand_join_cmd(&self, doc: &mut Vec<Command>) {
+        let mut stack = Vec::new();
+        stack.extend(doc.iter_mut().rev());
+
+        while !stack.is_empty() {
+            let cmd = unsafe { stack.pop().unwrap_unchecked() };
+
             match cmd {
                 Group(cmds, _) => {
-                    self.expand_join_cmd_inner(cmds);
+                    stack.extend(cmds.iter_mut().rev());
                 }
                 ConditionalGroup(cmds, _) => {
-                    self.expand_join_cmd_inner(cmds);
+                    stack.extend(cmds.iter_mut().rev());
                 }
                 IfBreak(break_cmd, flat_cmd, _) => {
-                    self.expand_join_cmd_inner(break_cmd);
-                    self.expand_join_cmd_inner(flat_cmd);
+                    stack.extend(flat_cmd.iter_mut().rev());
+                    stack.extend(break_cmd.iter_mut().rev());
                 }
                 Array(cmds, _) => {
-                    self.expand_join_cmd_inner(cmds);
+                    stack.extend(cmds.iter_mut().rev());
                 }
                 Indent(cmds, _) => {
-                    self.expand_join_cmd_inner(cmds);
+                    stack.extend(cmds.iter_mut().rev());
                 }
                 Dedent(cmds, _) => {
-                    self.expand_join_cmd_inner(cmds);
+                    stack.extend(cmds.iter_mut().rev());
                 }
-                Join(sep, cmds) => {
-                    let mut expanded_form = BumpVec::new_in(self.arena);
+                Join(separator, cmds) => {
+                    let mut array_cmd = vec![];
 
-                    let it = cmds.iter().take(cmds.len().max(1) - 1);
+                    let mut it = cmds.iter();
 
-                    for cmd in cmds.into_iter() {
-                        // let a = **sep;
-                        // expanded_form.push(*cmd);
-                        // expanded_form.push(*sep);
+                    if let Some(cmd_inner) = it.next() {
+                        array_cmd.push(cmd_inner.clone());
                     }
 
-                    // if let Some(cmd) = cmds.last() {
-                    //     expanded_form.push(cmd);
-                    // }
+                    for cmd_inner in it {
+                        array_cmd.push(*separator.clone());
+                        array_cmd.push(cmd_inner.clone());
+                    }
 
-                    let a = array!(expanded_form);
+                    *cmd = array!(array_cmd);
+                    stack.push(cmd);
                 }
-
                 _ => {}
             }
         }
     }
 
-    fn remove_join_cmd(&self, doc: &mut BumpVec<'a, Command<'a>>) {}
-
-    fn expand_join_cmd(&self, doc: &mut BumpVec<'a, Command<'a>>) {
-        todo!()
-        // self.expand_join_cmd_inner(doc);
-        // self.remove_join_cmd(doc);
-    }
-
     fn propagate_line_breaks_inner(
         &self,
-        doc: &mut BumpVec<'_, Command>,
+        doc: &mut Vec<Command>,
         propagate_hard_line: bool,
         propagate_break_parent: bool,
     ) -> bool {
@@ -160,11 +154,11 @@ impl<'a, 'b, 'c> Printer<'a> {
         break_all
     }
 
-    fn propagate_line_breaks(&self, doc: &mut BumpVec<'_, Command>) {
+    fn propagate_line_breaks(&self, doc: &mut Vec<Command>) {
         self.propagate_line_breaks_inner(doc, false, true);
     }
 
-    fn force_group_break(&mut self, cmds: &mut BumpVec<'_, Command>, width: &mut usize) {
+    fn force_group_break(&self, cmds: &mut Vec<Command>, width: &mut usize) {
         let mut stack = Vec::new();
         stack.extend(cmds.iter_mut().rev());
 
@@ -198,7 +192,7 @@ impl<'a, 'b, 'c> Printer<'a> {
         }
     }
 
-    fn adjust_group_width(&mut self, cmd: &mut Command, width: &mut usize) {
+    fn adjust_group_width(&self, cmd: &mut Command, width: &mut usize) {
         let mut parent_group_cmd;
         let mut parent_group_width;
         let mut stack = Vec::new();
@@ -264,6 +258,9 @@ impl<'a, 'b, 'c> Printer<'a> {
                             .map(|cmd| (cmd, opts._break_all_internal)),
                     );
                 }
+                Text(text) => {
+                    *width += text.len();
+                }
                 Softline(opts) => {
                     parent_group_cmd = None;
                     parent_group_width = 0;
@@ -323,7 +320,7 @@ impl<'a, 'b, 'c> Printer<'a> {
         }
     }
 
-    fn adjust_doc_width(&mut self, doc: &mut BumpVec<'_, Command>) {
+    fn adjust_doc_width(&self, doc: &mut Vec<Command>) {
         let mut stack = Vec::new();
 
         stack.extend(doc.iter_mut().rev().map(|cmd| (cmd, false)));
@@ -382,7 +379,7 @@ impl<'a, 'b, 'c> Printer<'a> {
         }
     }
 
-    fn print_doc(&mut self, doc: &BumpVec<'_, Command>) -> String {
+    fn print_doc(&self, doc: &Vec<Command>) -> String {
         let mut result = String::new();
 
         let mut stack = Vec::new();
@@ -445,17 +442,15 @@ impl<'a, 'b, 'c> Printer<'a> {
         result
     }
 
-    pub fn print(&mut self, doc: &'b mut BumpVec<'_, Command<'c>>) -> String {
+    pub fn print(&self, doc: &mut Vec<Command>) -> String {
+        self.expand_join_cmd(doc);
         self.propagate_line_breaks(doc);
         self.adjust_doc_width(doc);
-
+        println!("{:#?}", doc);
         self.print_doc(doc)
     }
 
-    pub fn new(arena: &'a Bump, fmt_opts: FormatterOptions) -> Self {
-        Printer {
-            arena,
-            opts: fmt_opts,
-        }
+    pub fn new(fmt_opts: FormatterOptions) -> Self {
+        Printer { opts: fmt_opts }
     }
 }

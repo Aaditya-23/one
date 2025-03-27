@@ -3,23 +3,23 @@ use bumpalo::{boxed::Box, collections::Vec, Bump};
 use crate::{
     allocator::CloneIn,
     ast::{
-        ArrayExpression, ArrayPattern, ArrowFunction, ArrowFunctionBody, AssignmentExpression,
-        AssignmentExpressionLHS, AssignmentOperator, AssignmentPattern, AwaitExpression,
-        BinaryExpression, BinaryOperator, Block, BooleanLiteral, BreakStatement, CallExpression,
-        CatchClause, Class, ClassBody, ClassMethod, ClassProperty, ConditionalExpression,
-        ContinueStatement, DebuggerStatement, DoWhileLoop, Elision, EmptyStatement, Expression,
-        ExpressionStatement, ForInLoop, ForInLoopLeft, ForLoop, ForLoopInit, Function,
-        FunctionParams, Identifier, IdentifierOrLiteral, IfStatement, Import, ImportAttribute,
-        ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier,
-        ImportSpecifierType, LabelledStatement, Location, LogicalExpression, LogicalOperator,
-        MemberExpression, MethodDefinitionKind, NewExpression, NullLiteral, NumericLiteral,
-        ObjectExpression, ObjectExpressionProperty, ObjectExpressionPropertyKind, ObjectPattern,
-        ObjectPatternProperty, ObjectPatternPropertyKind, Pattern, PropertyKind, Regexp,
-        RestElement, ReturnStatement, SequenceExpression, SpreadElement, Statement, StringLiteral,
-        SwitchCase, SwitchStatement, TemplateElement, TemplateLiteral, ThisExpression,
-        ThrowStatement, TryStatement, UnaryExpression, UnaryOperator, UpdateExpression,
-        UpdateOperator, VariableDeclaration, VariableDeclarationKind, VariableDeclarator,
-        WhileLoop, WithStatement, AST,
+        ArrayExpression, ArrayPattern, ArrayPatternKind, ArrowFunction, ArrowFunctionBody,
+        AssignmentExpression, AssignmentExpressionLHS, AssignmentOperator, AssignmentPattern,
+        AwaitExpression, BinaryExpression, BinaryOperator, Block, BooleanLiteral, BreakStatement,
+        CallExpression, CatchClause, Class, ClassBody, ClassMethod, ClassProperty,
+        ConditionalExpression, ContinueStatement, DebuggerStatement, DoWhileLoop, Elision,
+        EmptyStatement, Expression, ExpressionStatement, ForInLoop, ForInLoopLeft, ForLoop,
+        ForLoopInit, Function, FunctionParams, Identifier, IdentifierOrLiteral, IfStatement,
+        Import, ImportAttribute, ImportDeclaration, ImportDefaultSpecifier,
+        ImportNamespaceSpecifier, ImportSpecifier, ImportSpecifierType, LabelledStatement,
+        Location, LogicalExpression, LogicalOperator, MemberExpression, MethodDefinitionKind,
+        NewExpression, NullLiteral, NumericLiteral, ObjectExpression, ObjectExpressionProperty,
+        ObjectExpressionPropertyKind, ObjectPattern, ObjectPatternProperty,
+        ObjectPatternPropertyKind, Pattern, PropertyKind, Regexp, RestElement, ReturnStatement,
+        SequenceExpression, SpreadElement, Statement, StringLiteral, SwitchCase, SwitchStatement,
+        TemplateElement, TemplateLiteral, ThisExpression, ThrowStatement, TryStatement,
+        UnaryExpression, UnaryOperator, UpdateExpression, UpdateOperator, VariableDeclaration,
+        VariableDeclarationKind, VariableDeclarator, WhileLoop, WithStatement, AST,
     },
     kind::Kind,
     tokenizer::{LexContext, Token, Tokenizer},
@@ -229,12 +229,26 @@ impl<'a> Parser<'a> {
         let mut elements = Vec::new_in(self.arena);
 
         while !matches!(self.token.kind, Kind::EOF | Kind::BracketC) {
-            if self.token.kind == Kind::Comma {
-                self.bump();
-            } else if self.token.kind == Kind::Dot3 {
-                self.bump();
+            if self.kind(Kind::Comma) {
+                elements.push(None);
+            } else if self.kind(Kind::Dot3) {
+                let array_pattern = ArrayPatternKind::RestElement(Box::new_in(
+                    self.parse_rest_element(),
+                    self.arena,
+                ));
+
+                elements.push(Some(array_pattern));
             } else {
-                elements.push(self.parse_pattern_with_default_value());
+                let array_pattern = ArrayPatternKind::Pattern(Box::new_in(
+                    self.parse_pattern_with_default_value(),
+                    self.arena,
+                ));
+
+                elements.push(Some(array_pattern));
+            }
+
+            if !self.kind(Kind::BracketC) {
+                self.expect(Kind::Comma);
             }
         }
 
@@ -358,8 +372,25 @@ impl<'a> Parser<'a> {
             Expression::Identifier(id) => Pattern::IdentifierPattern(id),
             Expression::ArrayExpression(array) => {
                 let mut elements = Vec::new_in(self.arena);
-                array.elements.iter().for_each(|el| {
-                    elements.push(self.reinterpret_as_pattern(el.clone_in(self.arena)))
+                array.elements.iter().for_each(|el| match el {
+                    Expression::Elision(_) => elements.push(None),
+                    Expression::SpreadElement(inner) => {
+                        let array_pattern = ArrayPatternKind::RestElement(Box::new_in(
+                            RestElement {
+                                start: inner.start,
+                                argument: self
+                                    .reinterpret_as_pattern(inner.argument.clone_in(self.arena)),
+                                end: inner.end,
+                            },
+                            self.arena,
+                        ));
+
+                        elements.push(Some(array_pattern))
+                    }
+                    _ => elements.push(Some(ArrayPatternKind::Pattern(Box::new_in(
+                        self.reinterpret_as_pattern(el.clone_in(self.arena)),
+                        self.arena,
+                    )))),
                 });
 
                 Pattern::ArrayPattern(Box::new_in(

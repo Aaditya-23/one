@@ -9,12 +9,13 @@ mod doc_js;
 mod formatter;
 mod utils;
 
-pub fn format_js<'a>(arena: &'a Bump, code: &'a str, ast: Vec<'a, Statement<'a>>) -> String {
-    let doc_builder: doc_js::Doc<'a> = doc_js::Doc::new(arena, code, ast);
-    let mut doc: Vec<'a, Command<'a>> = doc_builder.build();
+pub fn format_js<'a>(code: &'a str, ast: Vec<'a, Statement<'a>>) -> String {
+    let doc_builder = doc_js::Doc::new(code, ast);
+    let mut doc = doc_builder.build();
 
     let fmt_opts = FormatterOptions::default();
-    let mut printer: Printer<'a> = Printer::new(arena, fmt_opts);
+    let printer = Printer::new(fmt_opts);
+    
     printer.print(&mut doc)
 }
 
@@ -32,8 +33,8 @@ mod test {
         let code = read_to_string("../../data/input.js").unwrap();
         let mut parser = Parser::new(&arena, &code);
         let ast = parser.parse();
-        
-        let clean_code = format_js(&arena, &code, ast);
+
+        let clean_code = format_js(&code, ast);
 
         let result = write("../../data/output.js", clean_code);
 

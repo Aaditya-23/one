@@ -1,6 +1,4 @@
-use bumpalo::{boxed::Box, collections::Vec, Bump};
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GroupOptions {
     pub should_break: bool,
     pub(in crate::utils) _break_all_internal: bool,
@@ -15,7 +13,7 @@ impl Default for GroupOptions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArrayOptions {
     pub(in crate::utils) _break_all_internal: bool,
 }
@@ -28,7 +26,7 @@ impl Default for ArrayOptions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IndentOptions {
     pub(in crate::utils) _break_all_internal: bool,
 }
@@ -41,7 +39,7 @@ impl Default for IndentOptions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DedentOptions {
     pub(in crate::utils) _break_all_internal: bool,
 }
@@ -54,7 +52,7 @@ impl Default for DedentOptions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IfBreakOptions {
     pub group_id: Option<String>,
     pub(in crate::utils) _break_all_internal: bool,
@@ -69,44 +67,41 @@ impl Default for IfBreakOptions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LineOptions {
     pub(in crate::utils) _insert_line_internal: bool,
-    pub(in crate::utils) _width_internal: usize,
 }
 
 impl Default for LineOptions {
     fn default() -> Self {
         Self {
-           _insert_line_internal: false,
-            _width_internal: 0,
+            _insert_line_internal: false,
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SoftlineOptions {
     pub(in crate::utils) _insert_line_internal: bool,
-    pub(in crate::utils) _width_internal: usize,
 }
 
 impl Default for SoftlineOptions {
     fn default() -> Self {
         Self {
             _insert_line_internal: false,
-            _width_internal: 0,
         }
     }
 }
 
+#[derive(Debug)]
 pub enum Command<'a> {
-    Group(Vec<'a, Command<'a>>, GroupOptions),
-    ConditionalGroup(Vec<'a, Command<'a>>, GroupOptions),
-    IfBreak(Vec<'a, Command<'a>>, Vec<'a, Command<'a>>, IfBreakOptions),
-    Array(Vec<'a, Command<'a>>, ArrayOptions),
-    Indent(Vec<'a, Command<'a>>, IndentOptions),
-    Dedent(Vec<'a, Command<'a>>, DedentOptions),
-    Join(Box<'a, Command<'a>>, Vec<'a, Command<'a>>),
+    Group(Vec<Command<'a>>, GroupOptions),
+    ConditionalGroup(Vec<Command<'a>>, GroupOptions),
+    IfBreak(Vec<Command<'a>>, Vec<Command<'a>>, IfBreakOptions),
+    Array(Vec<Command<'a>>, ArrayOptions),
+    Indent(Vec<Command<'a>>, IndentOptions),
+    Dedent(Vec<Command<'a>>, DedentOptions),
+    Join(Box<Command<'a>>, Vec<Command<'a>>),
     Text(&'a str),
     Line(LineOptions),
     Softline(SoftlineOptions),
@@ -114,66 +109,96 @@ pub enum Command<'a> {
     BreakParent,
 }
 
-// impl<'a> Command<'a> {
-//     pub fn clone_in(&self, arena: &Bump) -> Self {
-//         match self {
-//             Self::Group(cmds,opts ) => {
-//                 cmds.clone();
-//                 todo!()
-//             }
-//             _ => todo!()
-//         }
-//     }
-// } 
+impl Clone for Command<'_> {
+    fn clone(&self) -> Self {
+
+        match self {
+            Command::Group(cmds,opts ) => {
+                Command::Group(cmds.clone(), opts.clone())
+            }
+            Command::ConditionalGroup(cmds, opts ) => {
+                Command::ConditionalGroup(cmds.clone(), opts.clone())
+            }
+            Command::Array(cmds,opts )=> {
+                Command::Array(cmds.clone(),  opts.clone())
+            }
+            Command::IfBreak(break_cmd,flat_cmd ,opts ) => {
+                Command::IfBreak(break_cmd.clone(), flat_cmd.clone(), opts.clone())
+            }
+            Command::Indent(cmds,opts ) => {
+                Command::Indent(cmds.clone(), opts.clone())
+            }
+            Command::Dedent(cmds,opts ) => {
+                Command::Dedent(cmds.clone(), opts.clone())
+            }
+            Command::Join(sep, cmds ) => {
+                Command::Join(sep.clone(), cmds.clone())
+            }
+            Command::Text(text)=> {
+                Command::Text(text)
+            }
+            Command::Softline(opts) => {
+                Command::Softline(opts.clone())
+            }
+            Command::Line(opts) => {
+                Command::Line(opts.clone())
+            }
+            Command::Hardline => {
+                Command::Hardline
+            }
+            Command::BreakParent => {
+                Command::BreakParent
+            }
+        }
+    }
+}
 
 #[macro_export]
 macro_rules! group {
-    ($cmds:tt) => {{
+    ($cmds:expr) => {{
         Command::Group($cmds, GroupOptions::default())
     }};
 
-    ($arena:expr, $cmds:tt) => {{
-        let mut vec: Vec<Command<'a>> = Vec::new_in($arena);
-        vec.extend($cmds);
-
-        Command::Group(vec, GroupOptions::default())
-    }};
-
-    ($arena:expr, $cmds:tt, $should_break:expr) => {{
-        let mut vec: Vec<Command<'a>> = Vec::new_in($arena);
-        vec.extend($cmds);
-
+    ($cmds:expr, $should_break:expr) => {{
         let mut g_opts = GroupOptions::default();
         g_opts.should_break = $should_break;
 
-        Command::Group(vec, g_opts)
+        Command::Group($cmds, g_opts)
+    }};
+}
+
+#[macro_export]
+macro_rules! conditional_group {
+    ($cmds:expr) => {{
+        Command::ConditionalGroup($cmds, GroupOptions::default())
+    }};
+
+    ($cmds:expr, $should_break:expr) => {{
+        let mut g_opts = GroupOptions::default();
+        g_opts.should_break = $should_break;
+
+        Command::ConditionalGroup($cmds, g_opts)
     }};
 }
 
 #[macro_export]
 macro_rules! array {
-    ($cmds:tt) => {{
+    ($cmds:expr) => {{
         Command::Array($cmds, ArrayOptions::default())
-    }};
-
-    ($arena:expr, $cmds:tt) => {{
-        let mut vec: Vec<Command<'a>> = Vec::new_in($arena);
-        vec.extend($cmds);
-
-        Command::Array(vec, ArrayOptions::default())
     }};
 }
 
 #[macro_export]
-macro_rules! indent {
-    ($cmds:tt) => {{
-        Command::Indent($cmds, IndentOptions::default())
-    }};
-    ($arena:expr ,$cmds:tt) => {{
-        let mut vec = Vec::new_in($arena);
-        vec.extend($cmds);
+macro_rules! join {
+    ($sep:expr, $cmds:expr) => {
+        Command::Join(Box::new($sep), $cmds)
+    };
+}
 
-        Command::Indent(vec, IndentOptions::default())
+#[macro_export]
+macro_rules! indent {
+    ($cmds:expr) => {{
+        Command::Indent($cmds, IndentOptions::default())
     }};
 }
 

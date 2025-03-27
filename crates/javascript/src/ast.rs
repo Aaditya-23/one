@@ -15,9 +15,15 @@ pub struct Identifier {
 }
 
 #[derive(Debug, CloneIn)]
+pub enum ArrayPatternKind<'a> {
+    Pattern(Box<'a, Pattern<'a>>),
+    RestElement(Box<'a, RestElement<'a>>),
+}
+
+#[derive(Debug, CloneIn)]
 pub struct ArrayPattern<'a> {
     pub start: u32,
-    pub elements: Vec<'a, Pattern<'a>>,
+    pub elements: Vec<'a, Option<ArrayPatternKind<'a>>>,
     pub end: u32,
 }
 

@@ -1,8 +1,8 @@
-use bumpalo::{collections::Vec, Bump};
+use bumpalo::collections::Vec as BumpVec;
 use javascript::ast::{
-    ArrayExpression, ArrayPattern, ArrowFunction, ArrowFunctionBody, AssignmentExpression,
-    AssignmentExpressionLHS, AwaitExpression, BinaryExpression, BooleanLiteral, CallExpression,
-    Class, ConditionalExpression,
+    ArrayExpression, ArrayPattern, ArrayPatternKind, ArrowFunction, ArrowFunctionBody,
+    AssignmentExpression, AssignmentExpressionLHS, AwaitExpression, BinaryExpression,
+    BooleanLiteral, CallExpression, Class, ConditionalExpression,
     Expression::{self, *},
     Function, FunctionParams, Identifier, Import, LogicalExpression, MemberExpression,
     NewExpression, NullLiteral, NumericLiteral, ObjectExpression, ObjectExpressionPropertyKind,
@@ -13,7 +13,7 @@ use javascript::ast::{
 };
 
 use crate::{
-    array, break_parent, group, hardline, indent, line, softline, text,
+    array, break_parent, group, hardline, indent, join, line, softline, text,
     utils::commands::{
         Command::{self, *},
         *,
@@ -28,38 +28,36 @@ macro_rules! slice {
 }
 
 pub struct Doc<'a> {
-    arena: &'a Bump,
     code: &'a str,
-    ast: Vec<'a, Statement<'a>>,
+    ast: BumpVec<'a, Statement<'a>>,
 }
 
 impl<'a> Doc<'a> {
     fn build_from_array_pattern(&self, pattern: &ArrayPattern<'a>) -> Command<'a> {
-        let mut array_cmd = bumpalo::vec![in self.arena];
+        let join_separator = array!(vec![text!(","), line!()]);
+        let mut join_cmds = vec![];
 
-        let it = pattern
-            .elements
-            .iter()
-            .take((pattern.elements.len() as isize - 1).max(0) as usize);
-        for el in it {
-            array_cmd.push(self.build_from_pattern(el));
-            array_cmd.push(text!(","));
-            array_cmd.push(line!());
+        for el in pattern.elements.iter() {
+            match el {
+                Some(inner) => match inner {
+                    ArrayPatternKind::Pattern(inner) => {
+                        join_cmds.push(self.build_from_pattern(inner))
+                    }
+                    ArrayPatternKind::RestElement(inner) => join_cmds.push(array!(vec![
+                        text!("..."),
+                        self.build_from_pattern(&inner.argument)
+                    ])),
+                },
+                None => join_cmds.push(text!("")),
+            }
         }
 
-        if let Some(last_el) = pattern.elements.last() {
-            array_cmd.push(self.build_from_pattern(last_el));
-        }
-
-        group!(
-            self.arena,
-            [
-                text!("["),
-                indent!(self.arena, [softline!(), array!(array_cmd)]),
-                softline!(),
-                text!("]")
-            ]
-        )
+        group!(vec![
+            text!("["),
+            indent!(vec![softline!(), join!(join_separator, join_cmds)]),
+            softline!(),
+            text!("]")
+        ])
     }
 
     fn build_from_obj_pattern_property(
@@ -70,91 +68,69 @@ impl<'a> Doc<'a> {
             ObjectPatternPropertyKind::Property(p) => {
                 if p.computed {
                     (
-                        array!(
-                            self.arena,
-                            [
-                                text!("["),
-                                self.build_from_expression(&p.key),
-                                text!(": "),
-                                self.build_from_pattern(&p.value),
-                                text!("]")
-                            ]
-                        ),
+                        array!(vec![
+                            text!("["),
+                            self.build_from_expression(&p.key),
+                            text!(": "),
+                            self.build_from_pattern(&p.value),
+                            text!("]")
+                        ]),
                         false,
                     )
                 } else {
-                    let mut array_cmd =
-                        bumpalo::vec![in self.arena; self.build_from_expression(&p.key)];
+                    let mut array_cmd = vec![self.build_from_expression(&p.key)];
 
-                    let add_hardline;
+                    let should_break;
 
                     if !p.shorthand {
                         array_cmd.push(text!(": "));
                         array_cmd.push(self.build_from_pattern(&p.value));
 
                         if let Pattern::ObjectPattern(_) = p.value {
-                            add_hardline = true
+                            should_break = true
                         } else {
-                            add_hardline = false
+                            should_break = false
                         }
                     } else {
-                        add_hardline = false
+                        should_break = false
                     }
 
-                    (array!(array_cmd), add_hardline)
+                    (array!(array_cmd), should_break)
                 }
             }
             ObjectPatternPropertyKind::RestElement(rest_el) => (
-                array!(
-                    self.arena,
-                    [text!("..."), self.build_from_pattern(&rest_el.argument)]
-                ),
+                array!(vec![
+                    text!("..."),
+                    self.build_from_pattern(&rest_el.argument)
+                ]),
                 false,
             ),
         }
     }
 
     fn build_from_object_pattern(&self, pattern: &ObjectPattern<'a>) -> Command<'a> {
-        let mut array_cmd = bumpalo::vec![in self.arena];
+        let join_separator = array!(vec![text!(","), line!()]);
+        let mut join_cmds = vec![];
+        let mut should_break = false;
 
-        let it = pattern
-            .properties
-            .iter()
-            .take((pattern.properties.len() as isize - 1).max(0) as usize);
+        for property_kind in pattern.properties.iter() {
+            let (cmd, break_group) = self.build_from_obj_pattern_property(property_kind);
 
-        for property_kind in it {
-            let (cmd, add_hardline) = self.build_from_obj_pattern_property(property_kind);
-
-            array_cmd.push(cmd);
-            array_cmd.push(text!(","));
-
-            if add_hardline {
-                array_cmd.push(hardline!());
-            } else {
-                array_cmd.push(line!());
+            if break_group {
+                should_break = true;
             }
-        }
 
-        let mut softline_or_hardline = softline!();
-
-        if let Some(property_kind) = pattern.properties.last() {
-            let (cmd, add_hardline) = self.build_from_obj_pattern_property(property_kind);
-
-            array_cmd.push(cmd);
-
-            if add_hardline {
-                softline_or_hardline = hardline!();
-            }
+            join_cmds.push(cmd);
         }
 
         group!(
-            self.arena,
-            [
+            vec![
                 text!("{"),
-                indent!(self.arena, [softline!(), array!(array_cmd)]),
-                softline_or_hardline,
+                indent!(vec![softline!(), join!(join_separator, join_cmds)]),
+                softline!(),
                 text!("}")
-            ]
+            ],
+            should_break
         )
     }
 
@@ -164,16 +140,22 @@ impl<'a> Doc<'a> {
                 text!(slice!(self.code, ident.start, ident.end))
             }
 
-            Pattern::ArrayPattern(array) => self.build_from_array_pattern(array.as_ref()),
+            Pattern::ArrayPattern(array) => self.build_from_array_pattern(&array),
 
-            Pattern::ObjectPattern(obj) => self.build_from_object_pattern(obj.as_ref()),
+            Pattern::ObjectPattern(obj) => self.build_from_object_pattern(&obj),
 
             Pattern::AssignmentPattern(ass) => todo!(),
         }
     }
 
     fn build_from_variable_declarator(&self, declarator: &VariableDeclarator<'a>) -> Command<'a> {
-        todo!()
+        let pattern = self.build_from_pattern(&declarator.id);
+
+        if let Some(exp) = &declarator.init {
+            array!(vec![pattern, text![" = "], self.build_from_expression(exp)])
+        } else {
+            array!(vec![pattern])
+        }
     }
 
     fn build_from_variable_declaration(
@@ -181,27 +163,21 @@ impl<'a> Doc<'a> {
         declaration: &VariableDeclaration<'a>,
     ) -> Command<'a> {
         let kind = declaration.kind.as_str();
-        let mut array_cmd = bumpalo::vec![in self.arena; text!(kind), text!(" ")];
+        let mut array_cmd = vec![text!(kind), text!(" ")];
 
         let mut it = declaration.declarations.iter();
 
-        array_cmd
-            .push(self.build_from_variable_declarator(unsafe { it.next().unwrap_unchecked() }));
-
-        let mut ident_cmd = Vec::new_in(self.arena);
+        let join_separator = indent!(vec![text!(","), hardline!()]);
+        let mut join_cmds =
+            vec![self.build_from_variable_declarator(unsafe { it.next().unwrap_unchecked() })];
 
         for declarator in it {
-            ident_cmd.push(text!(","));
-            ident_cmd.push(hardline!());
-            ident_cmd.push(self.build_from_variable_declarator(declarator))
+            join_cmds.push(self.build_from_variable_declarator(declarator))
         }
 
+        array_cmd.push(join!(join_separator, join_cmds));
         array!(array_cmd)
     }
-
-    // fn build_assignment_exp(&self, exp: &AssignmentExpression<'a>) -> DocBuilder<'a> {
-    //     todo!()
-    // }
 
     fn build_from_identifier(&self, ident: &Identifier) -> Command<'a> {
         let text = slice!(self.code, ident.start, ident.end);
@@ -215,7 +191,7 @@ impl<'a> Doc<'a> {
 
     fn build_from_string_literal(&self, literal: &StringLiteral) -> Command<'a> {
         let text = slice!(self.code, literal.start, literal.end);
-        group!(self.arena, [text!("\""), text!(text), text!("\"")])
+        group!(vec![text!("\""), text!(text), text!("\"")])
     }
 
     fn build_from_boolean_literal(&self, literal: &BooleanLiteral) -> Command<'a> {
@@ -233,7 +209,7 @@ impl<'a> Doc<'a> {
     }
 
     fn build_from_array_exp(&self, exp: &ArrayExpression<'a>) -> Command<'a> {
-        let mut array_cmd = bumpalo::vec![in self.arena];
+        let mut array_cmd = vec![];
 
         let it = exp
             .elements
@@ -250,15 +226,12 @@ impl<'a> Doc<'a> {
             array_cmd.push(self.build_from_expression(last_el));
         }
 
-        group!(
-            self.arena,
-            [
-                text!("["),
-                indent!(self.arena, [softline!(), array!(array_cmd)]),
-                softline!(),
-                text!("]")
-            ]
-        )
+        group!(vec![
+            text!("["),
+            indent!(vec![softline!(), array!(array_cmd)]),
+            softline!(),
+            text!("]")
+        ])
     }
 
     pub fn build_from_obj_exp_property(
@@ -268,19 +241,15 @@ impl<'a> Doc<'a> {
         match property_kind {
             ObjectExpressionPropertyKind::Property(p) => {
                 if p.computed {
-                    array!(
-                        self.arena,
-                        [
-                            text!("["),
-                            self.build_from_expression(&p.key),
-                            text!(": "),
-                            self.build_from_expression(&p.value),
-                            text!("]")
-                        ]
-                    )
+                    array!(vec![
+                        text!("["),
+                        self.build_from_expression(&p.key),
+                        text!(": "),
+                        self.build_from_expression(&p.value),
+                        text!("]")
+                    ])
                 } else {
-                    let mut array_cmd =
-                        bumpalo::vec![in self.arena; self.build_from_expression(&p.key)];
+                    let mut array_cmd = vec![self.build_from_expression(&p.key)];
 
                     if !p.shorthand {
                         array_cmd.push(text!(": "));
@@ -290,18 +259,15 @@ impl<'a> Doc<'a> {
                     array!(array_cmd)
                 }
             }
-            ObjectExpressionPropertyKind::SpreadElement(spread_el) => array!(
-                self.arena,
-                [
-                    text!("..."),
-                    self.build_from_expression(&spread_el.argument)
-                ]
-            ),
+            ObjectExpressionPropertyKind::SpreadElement(spread_el) => array!(vec![
+                text!("..."),
+                self.build_from_expression(&spread_el.argument)
+            ]),
         }
     }
 
     fn build_from_object_exp(&self, exp: &ObjectExpression<'a>) -> Command<'a> {
-        let mut array_cmd = bumpalo::vec![in self.arena];
+        let mut array_cmd = vec![];
 
         let it = exp
             .properties
@@ -320,47 +286,38 @@ impl<'a> Doc<'a> {
             array_cmd.push(self.build_from_obj_exp_property(property_kind));
         }
 
-        group!(
-            self.arena,
-            [
-                text!("{"),
-                indent!(self.arena, [softline!(), array!(array_cmd)]),
-                softline!(),
-                text!("}")
-            ]
-        )
+        group!(vec![
+            text!("{"),
+            indent!(vec![softline!(), array!(array_cmd)]),
+            softline!(),
+            text!("}")
+        ])
     }
 
     fn build_from_binary_exp(&self, exp: &BinaryExpression<'a>) -> Command<'a> {
         let left = self.build_from_expression(&exp.left);
         let right = self.build_from_expression(&exp.right);
 
-        group!(
-            self.arena,
-            [
-                left,
-                softline!(),
-                text!(exp.operator.as_str()),
-                line!(),
-                right
-            ]
-        )
+        group!(vec![
+            left,
+            softline!(),
+            text!(exp.operator.as_str()),
+            line!(),
+            right
+        ])
     }
 
     fn build_from_logical_exp(&self, exp: &LogicalExpression<'a>) -> Command<'a> {
         let left = self.build_from_expression(&exp.left);
         let right = self.build_from_expression(&exp.right);
 
-        group!(
-            self.arena,
-            [
-                left,
-                softline!(),
-                text!(exp.operator.as_str()),
-                line!(),
-                right
-            ]
-        )
+        group!(vec![
+            left,
+            softline!(),
+            text!(exp.operator.as_str()),
+            line!(),
+            right
+        ])
     }
 
     fn build_from_ass_exp(&self, exp: &AssignmentExpression<'a>) -> Command<'a> {
@@ -371,20 +328,17 @@ impl<'a> Doc<'a> {
 
         let right = self.build_from_expression(&exp.right);
 
-        array!(
-            self.arena,
-            [
-                left,
-                text!(" "),
-                text!(exp.operator.as_str()),
-                line!(),
-                right
-            ]
-        )
+        array!(vec![
+            left,
+            text!(" "),
+            text!(exp.operator.as_str()),
+            line!(),
+            right
+        ])
     }
 
     fn build_from_update_exp(&self, exp: &UpdateExpression<'a>) -> Command<'a> {
-        let mut array_cmd = bumpalo::vec![in self.arena];
+        let mut array_cmd = vec![];
         let arg = self.build_from_expression(&exp.argument);
 
         if exp.prefix {
@@ -400,7 +354,7 @@ impl<'a> Doc<'a> {
 
     fn build_from_unary_exp(&self, exp: &UnaryExpression<'a>) -> Command<'a> {
         let arg = self.build_from_expression(&exp.argument);
-        array!(self.arena, [text!(exp.operator.as_str()), arg])
+        array!(vec![text!(exp.operator.as_str()), arg])
     }
 
     fn build_from_conditional_exp(&self, exp: &ConditionalExpression<'a>) -> Command<'a> {
@@ -408,32 +362,29 @@ impl<'a> Doc<'a> {
         let consequent = self.build_from_expression(&exp.consequent);
         let alternate = self.build_from_expression(&exp.alternate);
 
-        array!(
-            self.arena,
-            [
-                test,
-                line!(),
-                text!("? "),
-                consequent,
-                line!(),
-                text!(": "),
-                alternate
-            ]
-        )
+        array!(vec![
+            test,
+            line!(),
+            text!("? "),
+            consequent,
+            line!(),
+            text!(": "),
+            alternate
+        ])
     }
 
     fn build_from_this_exp(&self, _: &ThisExpression) -> Command<'a> {
-        array!(self.arena, [text!("this")])
+        text!("this")
     }
 
     fn build_from_new_exp(&self, exp: &NewExpression<'a>) -> Command<'a> {
         let callee = self.build_from_expression(&exp.callee);
 
-        array!(self.arena, [text!("new "), callee, text!("()")])
+        array!(vec![text!("new "), callee, text!("()")])
     }
 
-    fn build_from_function_params(&self, params: &Vec<'a, FunctionParams<'a>>) -> Command<'a> {
-        let mut indent_cmd = bumpalo::vec![in self.arena];
+    fn build_from_function_params(&self, params: &BumpVec<'_, FunctionParams<'a>>) -> Command<'a> {
+        let mut indent_cmd = vec![];
         indent_cmd.push(softline!());
 
         let it = params
@@ -444,10 +395,10 @@ impl<'a> Doc<'a> {
             match param {
                 FunctionParams::Pattern(p) => self.build_from_pattern(p),
                 FunctionParams::RestElement(rest_el) => {
-                    array!(
-                        self.arena,
-                        [text!("..."), self.build_from_pattern(&rest_el.argument)]
-                    )
+                    array!(vec![
+                        text!("..."),
+                        self.build_from_pattern(&rest_el.argument)
+                    ])
                 }
             }
         };
@@ -462,22 +413,22 @@ impl<'a> Doc<'a> {
             indent_cmd.push(from_array_pattern(last_param));
         }
 
-        array!(
-            self.arena,
-            [text!("("), indent!(indent_cmd), softline!(), text!(")")]
-        )
+        array!(vec![
+            text!("("),
+            indent!(indent_cmd),
+            softline!(),
+            text!(")")
+        ])
     }
 
     fn build_from_function(&self, exp: &Function<'a>) -> Command<'a> {
-        let mut array_cmd = bumpalo::vec![in self.arena];
+        let mut array_cmd = vec![];
 
         if exp.async_ {
             array_cmd.push(text!("async "));
         }
 
-        if let Some(id) = &exp.id {
-            array_cmd.push(self.build_from_identifier(id));
-        }
+        array_cmd.push(text!("function"));
 
         if exp.generator {
             array_cmd.push(text!("*"));
@@ -485,24 +436,33 @@ impl<'a> Doc<'a> {
 
         array_cmd.push(text!(" "));
 
+        if let Some(id) = &exp.id {
+            array_cmd.push(self.build_from_identifier(id));
+        }
+
         let params = self.build_from_function_params(&exp.params);
         array_cmd.push(params);
 
         array_cmd.push(text!(" {"));
-        array_cmd.push(hardline!());
+
+        let mut indent_cmd = vec![hardline!()];
+        let mut join_cmds = vec![];
 
         for statement in exp.body.body.iter() {
-            array_cmd.push(self.build_from_statement(statement));
-            array_cmd.push(hardline!());
+            join_cmds.push(self.build_from_statement(statement));
         }
 
+        indent_cmd.push(join!(hardline!(), join_cmds));
+        array_cmd.push(indent!(indent_cmd));
+
+        array_cmd.push(hardline!());
         array_cmd.push(text!("}"));
 
         array!(array_cmd)
     }
 
     fn build_from_arrow_function(&self, exp: &ArrowFunction<'a>) -> Command<'a> {
-        let mut array_cmd = bumpalo::vec![in self.arena];
+        let mut array_cmd = vec![];
 
         if exp.async_ {
             array_cmd.push(text!("async "));
@@ -538,8 +498,8 @@ impl<'a> Doc<'a> {
         todo!()
     }
 
-    fn build_from_func_arguments(&self, args: &Vec<'a, Expression<'a>>) -> Command<'a> {
-        let mut indent_cmd = bumpalo::vec![in self.arena];
+    fn build_from_func_arguments(&self, args: &BumpVec<'a, Expression<'a>>) -> Command<'a> {
+        let mut indent_cmd = vec![];
         indent_cmd.push(softline!());
 
         let it = args.iter().take((args.len() as isize - 1).max(0) as usize);
@@ -559,7 +519,7 @@ impl<'a> Doc<'a> {
 
     fn build_from_call_exp(&self, exp: &CallExpression<'a>) -> Command<'a> {
         let callee = slice!(self.code, exp.start, exp.end);
-        let mut array_cmd = bumpalo::vec![in self.arena; text!(callee)];
+        let mut array_cmd = vec![text!(callee)];
 
         if exp.optional {
             array_cmd.push(text!("?."));
@@ -577,7 +537,7 @@ impl<'a> Doc<'a> {
     }
 
     fn build_from_member_exp(&self, exp: &MemberExpression<'a>) -> Command<'a> {
-        let mut array_cmd = bumpalo::vec![in self.arena];
+        let mut array_cmd = vec![];
 
         array_cmd.push(self.build_from_expression(&exp.object));
 
@@ -601,7 +561,7 @@ impl<'a> Doc<'a> {
     }
 
     fn build_from_sequence_exp(&self, exp: &SequenceExpression<'a>) -> Command<'a> {
-        let mut indent_cmd = bumpalo::vec![in self.arena];
+        let mut indent_cmd = vec![];
         indent_cmd.push(softline!());
 
         let it = exp.expressions.iter().take(
@@ -620,10 +580,12 @@ impl<'a> Doc<'a> {
             indent_cmd.push(self.build_from_expression(last_exp));
         }
 
-        array!(
-            self.arena,
-            [text!("("), indent!(indent_cmd), softline!(), text!(")")]
-        )
+        array!(vec![
+            text!("("),
+            indent!(indent_cmd),
+            softline!(),
+            text!(")")
+        ])
     }
 
     fn build_from_regular_exp(&self, exp: &Regexp<'a>) -> Command<'a> {
@@ -631,7 +593,7 @@ impl<'a> Doc<'a> {
     }
 
     fn build_from_template_literal(&self, exp: &TemplateLiteral<'a>) -> Command<'a> {
-        let mut array_cmd = bumpalo::vec![in self.arena];
+        let mut array_cmd = vec![];
 
         array_cmd.push(text!("`"));
 
@@ -656,7 +618,7 @@ impl<'a> Doc<'a> {
     fn build_from_await_exp(&self, exp: &AwaitExpression<'a>) -> Command<'a> {
         let arg = self.build_from_expression(&exp.argument);
 
-        array!(self.arena, [text!("await"), arg])
+        array!(vec![text!("await"), arg])
     }
 
     fn build_from_expression(&self, exp: &Expression<'a>) -> Command<'a> {
@@ -696,12 +658,13 @@ impl<'a> Doc<'a> {
         match statement {
             VariableDeclaration(vd) => self.build_from_variable_declaration(vd),
             ExpressionStatement(exp_stmt) => self.build_from_expression(&exp_stmt.exp),
+            FunctionDeclaration(function) => self.build_from_function(function),
             _ => todo!(),
         }
     }
 
-    pub fn build(&self) -> Vec<'a, Command<'a>> {
-        let mut doc = bumpalo::vec![in self.arena];
+    pub fn build(&self) -> Vec<Command<'a>> {
+        let mut doc = vec![];
 
         for statement in self.ast.iter() {
             doc.push(self.build_from_statement(statement));
@@ -710,7 +673,7 @@ impl<'a> Doc<'a> {
         doc
     }
 
-    pub fn new(arena: &'a Bump, code: &'a str, ast: Vec<'a, Statement<'a>>) -> Self {
-        Self { arena, code, ast }
+    pub fn new(code: &'a str, ast: BumpVec<'a, Statement<'a>>) -> Self {
+        Self { code, ast }
     }
 }
