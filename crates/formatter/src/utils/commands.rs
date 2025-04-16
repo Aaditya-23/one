@@ -64,6 +64,14 @@ macro_rules! group {
 
         Command::Group($cmds, g_opts)
     }};
+
+    ($cmds:expr, $should_break:expr, $id:expr) => {{
+        let mut g_opts = GroupOptions::default();
+        g_opts.should_break = $should_break;
+        g_opts.id = Some($id.to_string());
+
+        Command::Group($cmds, g_opts)
+    }};
 }
 
 #[macro_export]

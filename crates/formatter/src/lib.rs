@@ -10,20 +10,21 @@ mod formatter;
 mod utils;
 
 pub fn format_js<'a>(code: &'a str, ast: Vec<'a, Statement<'a>>) -> String {
+    // println!("{:#?}", ast);
     let doc_builder = doc_js::Doc::new(code, ast);
     let mut doc = doc_builder.build();
 
     let fmt_opts = FormatterOptions::default();
     let printer = Printer::new(fmt_opts);
-    
+
     printer.print(&mut doc)
 }
 
 #[cfg(test)]
 mod test {
-    use std::fs::{read_to_string, write};
-
+    use bumpalo::collections::vec;
     use javascript::parser::Parser;
+    use std::fs::{read_to_string, write};
 
     use super::*;
 
@@ -41,5 +42,21 @@ mod test {
         if let Err(err) = result {
             println!("An error occurred: {}", err);
         }
+    }
+
+    #[test]
+    fn custom_format() {
+        let mut doc = vec![
+            text!("sumdi-"),
+            self::line!(),
+            text!("me"),
+            group!(vec![text!("gumdi"), self::line!()]),
+        ];
+
+        let fmt_opts = FormatterOptions::default();
+        let printer = Printer::new(fmt_opts);
+
+        let code = printer.print(&mut doc);
+        println!("{:#?}", code);
     }
 }

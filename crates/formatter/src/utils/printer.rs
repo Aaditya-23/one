@@ -1,7 +1,10 @@
+use std::collections::VecDeque;
+
 use crate::array;
 
 use super::commands::{Command::*, *};
 
+#[derive(Debug, PartialEq)]
 enum PrintInstruction {
     GroupForceBreak,
     GroupBreak,
@@ -21,7 +24,7 @@ pub struct FormatterOptions {
 impl Default for FormatterOptions {
     fn default() -> Self {
         Self {
-            width: 50,
+            width: 10,
             tabs: false,
             indent_size: 2,
             semicolons: true,
@@ -33,6 +36,8 @@ impl Default for FormatterOptions {
 pub struct Printer {
     opts: FormatterOptions,
 }
+
+type PrevLineInfo<'a> = Option<(usize, usize, Option<&'a Vec<Command<'a>>>)>;
 
 impl<'a> Printer {
     fn expand_join_cmd(&self, doc: &mut Vec<Command>) {
@@ -245,83 +250,179 @@ impl<'a> Printer {
 
     fn break_group(
         &self,
-        cmds: &Vec<Command>,
+        cmds: &'a Vec<Command>,
         print_instructions: &mut Vec<PrintInstruction>,
         instructions_index: &mut usize,
         width: &mut usize,
+        _prev_line_info: PrevLineInfo<'a>,
         break_all: bool,
-    ) {
-        let mut stack = Vec::new();
-        stack.extend(cmds.iter().rev());
+    ) -> PrevLineInfo<'a> {
+        // let mut unbroken_line = false;
+        // let (temp_instruction_index, temp_width) = (*instructions_index, *width);
+        // let mut unbroken_groups = VecDeque::new();
+        // let mut stack = Vec::new();
+        // stack.extend(cmds.iter().rev());
 
-        while !stack.is_empty() {
-            let cmd = unsafe { stack.pop().unwrap_unchecked() };
-            *instructions_index += 1;
+        // while !stack.is_empty() {
+        //     let cmd = unsafe { stack.pop().unwrap_unchecked() };
+        //     *instructions_index += 1;
 
-            match cmd {
-                Group(cmds, _) => {
-                    if break_all {
-                        stack.extend(cmds.iter().rev());
-                    } else {
-                        // self.adjust_group_width(group_cmd, width);
-                    }
-                }
-                Array(cmds) => {
-                    stack.extend(cmds.iter().rev());
-                }
-                Indent(cmds) => {
-                    stack.extend(cmds.iter().rev());
-                }
-                Dedent(cmds) => {
-                    stack.extend(cmds.iter().rev());
-                }
-                Softline | Line => {
-                    *width = 0;
-                    print_instructions[*instructions_index] = PrintInstruction::LineBreak;
-                }
-                Hardline => {
-                    *width = 0;
-                }
+        //     match cmd {
+        //         Group(cmds, _) => {
+        //             if break_all
+        //                 || print_instructions[*instructions_index] == PrintInstruction::GroupBreak
+        //             {
+        //                 stack.extend(cmds.iter().rev());
+        //             } else {
+        //                 unbroken_groups.push_back(*instructions_index);
 
-                _ => {}
-            }
-        }
+        //                 unbroken_line = self.adjust_group_width(
+        //                     cmd,
+        //                     print_instructions,
+        //                     instructions_index,
+        //                     width,
+        //                 );
+        //             }
+        //         }
+        //         Array(cmds) => {
+        //             stack.extend(cmds.iter().rev());
+        //         }
+        //         Indent(cmds) => {
+        //             stack.extend(cmds.iter().rev());
+        //         }
+        //         Dedent(cmds) => {
+        //             stack.extend(cmds.iter().rev());
+        //         }
+        //         Text(txt) => {
+        //             *width += txt.len();
+        //         }
+        //         Softline | Line => {
+        //             *width = 0;
+        //             print_instructions[*instructions_index] = PrintInstruction::LineBreak;
+        //             unbroken_line = false;
+        //         }
+        //         Hardline => {
+        //             *width = 0;
+        //             unbroken_line = false;
+        //         }
+
+        //         _ => {}
+        //     }
+        // }
+
+        // if *width > self.opts.width && !unbroken_groups.is_empty() {
+        //     while !unbroken_groups.is_empty() {
+        //         let cmd_instruction_index =
+        //             unsafe { unbroken_groups.pop_front().unwrap_unchecked() };
+
+        //         if print_instructions[cmd_instruction_index] != PrintInstruction::GroupBreak {
+        //             print_instructions[cmd_instruction_index] = PrintInstruction::GroupBreak;
+        //             *width = temp_width;
+        //             *instructions_index = temp_instruction_index;
+
+        //             return self.break_group(
+        //                 cmds,
+        //                 print_instructions,
+        //                 instructions_index,
+        //                 width,
+        //                 break_all,
+        //             );
+        //         }
+        //     }
+        // }
+
+        // if break_all {
+        //     false
+        // } else {
+        //     unbroken_line
+        // }
+        todo!()
     }
 
     fn adjust_group_width(
         &self,
-        group_cmd: &Command,
+        group_cmd: &'a Command,
         print_instructions: &mut Vec<PrintInstruction>,
         instructions_index: &mut usize,
         width: &mut usize,
-    ) {
+        _prev_line_info: PrevLineInfo<'a>,
+    ) -> PrevLineInfo<'a> {
+        let mut prev_line_info = _prev_line_info;
         let mut stack = Vec::new();
         let (temp_instructions_index, temp_width) = (*instructions_index, *width);
 
-        match group_cmd {
-            Group(cmds, _) => {
-                stack.extend(cmds.iter().rev());
-            }
+        let parent_group_cmds = match group_cmd {
+            Group(cmds, _) => cmds,
             _ => unsafe { core::hint::unreachable_unchecked() },
-        }
+        };
+
+        stack.extend(parent_group_cmds.iter().rev());
 
         while !stack.is_empty() {
             let cmd = unsafe { stack.pop().unwrap_unchecked() };
             *instructions_index += 1;
 
-            match cmd {
-                Group(cmds, _) => {
-                    match print_instructions[*instructions_index] {
-                        PrintInstruction::GroupForceBreak => {
-                            self.break_group(cmds, print_instructions, instructions_index, width, true);
+            if *width > self.opts.width {
+                *width = temp_width;
+                *instructions_index = temp_instructions_index;
+
+                print_instructions[*instructions_index] = PrintInstruction::GroupBreak;
+
+                let line_info = self.break_group(
+                    parent_group_cmds,
+                    print_instructions,
+                    instructions_index,
+                    width,
+                    _prev_line_info,
+                    false,
+                );
+
+                if *width > self.opts.width {
+                    if let Some((instruction_index, temp_width, group_cmd)) = prev_line_info {
+                        if let Some(cmds) = group_cmd {
+                            if print_instructions[instruction_index] != PrintInstruction::GroupBreak
+                            {
+                                self.break_group(
+                                    cmds,
+                                    print_instructions,
+                                    instructions_index,
+                                    width,
+                                    false,
+                                );
+                            }
+                        } else if print_instructions[instruction_index]
+                            != PrintInstruction::LineBreak
+                        {
+                            print_instructions[instruction_index] = PrintInstruction::LineBreak;
+                            *width -= temp_width;
                         }
-                        PrintInstruction::GroupBreak => {
-                            self.break_group(cmds, print_instructions, instructions_index, width, false);
-                        }
-                        _ => stack.extend(cmds.iter().rev()),
                     }
-                    
                 }
+                return line_info;
+            }
+
+            match cmd {
+                Group(cmds, _) => match print_instructions[*instructions_index] {
+                    PrintInstruction::GroupForceBreak => {
+                        prev_line_info = self.break_group(
+                            cmds,
+                            print_instructions,
+                            instructions_index,
+                            width,
+                            true,
+                        );
+                    }
+                    PrintInstruction::GroupBreak => {
+                        prev_line_info = self.break_group(
+                            cmds,
+                            print_instructions,
+                            instructions_index,
+                            width,
+                            false,
+                        );
+                    }
+                    _ => stack.extend(cmds.iter().rev()),
+                },
                 Array(cmds) => {
                     stack.extend(cmds.iter().rev());
                 }
@@ -334,35 +435,104 @@ impl<'a> Printer {
                 Text(txt) => {
                     *width += txt.len();
                 }
-                Softline | Line => {
-                    if *width > self.opts.width {
-                        *width  = temp_width;
-                        *instructions_index = temp_instructions_index;
-
-                        let cmds = match group_cmd {
-                            Group(cmds, _) => cmds,
-                            _ => unsafe { core::hint::unreachable_unchecked() },
-                        };
-                        
-                        return self.break_group(cmds, print_instructions, instructions_index, width, false);
-                    }
+                Softline => {
+                    prev_line_info =
+                        Some((temp_instructions_index, temp_width, Some(parent_group_cmds)));
+                }
+                Line => {
+                    *width += 1;
+                    prev_line_info =
+                        Some((temp_instructions_index, temp_width, Some(parent_group_cmds)));
+                }
+                Hardline => {
+                    prev_line_info =
+                        Some((temp_instructions_index, temp_width, Some(parent_group_cmds)));
                 }
                 _ => {}
             }
-            
         }
-        
-        
+
+        if *width > self.opts.width {
+            *width = temp_width;
+            *instructions_index = temp_instructions_index;
+
+            print_instructions[*instructions_index] = PrintInstruction::GroupBreak;
+
+            let line_info = self.break_group(
+                parent_group_cmds,
+                print_instructions,
+                instructions_index,
+                width,
+                false,
+            );
+
+            if *width > self.opts.width {
+                if let Some((instruction_index, temp_width, group_cmd)) = prev_line_info {
+                    if let Some(cmds) = group_cmd {
+                        if print_instructions[instruction_index] != PrintInstruction::GroupBreak {
+                            self.break_group(
+                                cmds,
+                                print_instructions,
+                                instructions_index,
+                                width,
+                                false,
+                            );
+                        }
+                    } else if print_instructions[instruction_index] != PrintInstruction::LineBreak {
+                        print_instructions[instruction_index] = PrintInstruction::LineBreak;
+                        *width -= temp_width;
+                    }
+                }
+            }
+
+            return line_info;
+        }
+
+        prev_line_info
     }
 
-    fn adjust_doc_width(&self, doc: &Vec<Command>, print_instructions: &mut Vec<PrintInstruction>) {
+    fn adjust_doc_width(
+        &self,
+        doc: &'a Vec<Command<'a>>,
+        print_instructions: &mut Vec<PrintInstruction>,
+    ) -> PrevLineInfo<'a> {
         let mut stack = Vec::new();
         let (mut width, mut instructions_index) = (0, 0);
+        let mut prev_line_info = None;
 
         stack.extend(doc.iter().rev().map(|cmd| (cmd, false)));
 
         while !stack.is_empty() {
             let (cmd, break_line) = unsafe { stack.pop().unwrap_unchecked() };
+
+            if width > self.opts.width {
+                if let Some((instruction_index, width_at_break, group_cmds)) = prev_line_info {
+                    if print_instructions[instruction_index] != PrintInstruction::LineBreak {
+                        if let Some(cmds) = group_cmds {
+                            let mut temp_instructions_index = instructions_index;
+                            let temp_width = width;
+
+                            let unbroken_line = self.break_group(
+                                cmds,
+                                print_instructions,
+                                &mut temp_instructions_index,
+                                &mut width,
+                                false,
+                            );
+
+                            // if unbroken_line {
+                            //     prev_unbroken_line_info = Some((0, 0, Some(cmds)))
+                            // } else {
+                            //     prev_unbroken_line_info = None;
+                            // }
+                        } else {
+                            print_instructions[instruction_index] = PrintInstruction::LineBreak;
+                            width -= width_at_break;
+                            prev_line_info = None;
+                        }
+                    }
+                }
+            }
 
             match cmd {
                 Group(cmds, _) => match print_instructions[instructions_index] {
@@ -376,16 +546,31 @@ impl<'a> Printer {
                         );
                     }
                     PrintInstruction::GroupBreak => {
-                        self.break_group(
+                        let unbroken_line = self.break_group(
                             cmds,
                             print_instructions,
                             &mut instructions_index,
                             &mut width,
                             false,
                         );
+
+                        // if unbroken_line {
+                        //     prev_unbroken_line_info = Some((0, 0, Some(cmds)))
+                        // }
                     }
+
                     _ => {
-                        self.adjust_group_width(cmd, print_instructions, &mut instructions_index, &mut width);
+                        let unbroken_line = self.adjust_group_width(
+                            cmd,
+                            print_instructions,
+                            &mut instructions_index,
+                            &mut width,
+                            prev_line_info,
+                        );
+
+                        // if unbroken_line {
+                        //     prev_unbroken_line_info = Some((0, 0, Some(cmds)));
+                        // }
                     }
                 },
                 Array(cmds) => {
@@ -397,7 +582,7 @@ impl<'a> Printer {
                         break_cmd = false;
                     }
 
-                    stack.extend(cmds.iter().rev().map(|cmd| (cmd, break_cmd)));
+                    stack.extend(cmds.iter().rev().map(|subcmd| (subcmd, break_cmd)));
                 }
                 Indent(cmds) => {
                     let break_cmd;
@@ -408,7 +593,7 @@ impl<'a> Printer {
                         break_cmd = false;
                     }
 
-                    stack.extend(cmds.iter().rev().map(|cmd| (cmd, break_cmd)));
+                    stack.extend(cmds.iter().rev().map(|subcmd| (subcmd, break_cmd)));
                 }
                 Dedent(cmds) => {
                     let break_cmd;
@@ -419,22 +604,31 @@ impl<'a> Printer {
                         break_cmd = false;
                     }
 
-                    stack.extend(cmds.iter().rev().map(|cmd| (cmd, break_cmd)));
+                    stack.extend(cmds.iter().rev().map(|subcmd| (subcmd, break_cmd)));
                 }
                 Text(txt) => {
                     width += txt.len();
                 }
-                Softline | Line => {
+                Softline => {
                     if break_line {
                         width = 0;
-                        print_instructions[instructions_index] = PrintInstruction::LineBreak
-                    } else if width > self.opts.width {
-                        width = 0;
-                        print_instructions[instructions_index] = PrintInstruction::LineBreak
+                        print_instructions[instructions_index] = PrintInstruction::LineBreak;
+                    } else {
                     }
+                    prev_line_info = Some((instructions_index, width, None));
+                }
+                Line => {
+                    if break_line {
+                        width = 0;
+                        print_instructions[instructions_index] = PrintInstruction::LineBreak;
+                    } else {
+                        width += 1;
+                    }
+                    prev_line_info = Some((instructions_index, width, None));
                 }
                 Hardline => {
                     width = 0;
+                    prev_line_info = Some((instructions_index, width, None));
                 }
 
                 _ => {}
@@ -442,6 +636,29 @@ impl<'a> Printer {
 
             instructions_index += 1;
         }
+
+        if width > self.opts.width {
+            if let Some((instruction_index, _, group_cmds)) = prev_line_info {
+                if print_instructions[instruction_index] != PrintInstruction::LineBreak {
+                    if let Some(cmds) = group_cmds {
+                        let mut temp_instructions_index = instructions_index;
+
+                        self.break_group(
+                            cmds,
+                            print_instructions,
+                            &mut temp_instructions_index,
+                            &mut width,
+                            false,
+                        );
+                    } else {
+                        print_instructions[instruction_index] = PrintInstruction::LineBreak;
+                    }
+                }
+                prev_line_info = None;
+            }
+        }
+
+        prev_line_info
     }
 
     fn print_doc(&self, doc: &Vec<Command>, print_instructions: &Vec<PrintInstruction>) -> String {
@@ -449,7 +666,7 @@ impl<'a> Printer {
 
         let mut stack = Vec::new();
         let mut instructions_index = 0;
-        
+
         stack.extend(doc.iter().rev().map(|cmd| (cmd, 0)));
 
         let gen_indent = |indentation| {
@@ -504,7 +721,7 @@ impl<'a> Printer {
                 }
                 _ => {}
             }
-        
+
             instructions_index += 1;
         }
 
@@ -518,6 +735,7 @@ impl<'a> Printer {
 
         self.propagate_line_breaks(doc, &mut print_instructions);
         self.adjust_doc_width(doc, &mut print_instructions);
+        println!("{:#?}", doc);
         self.print_doc(doc, &print_instructions)
     }
 

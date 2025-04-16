@@ -57,7 +57,7 @@ impl<'a> Doc<'a> {
             indent!(vec![softline!(), join!(join_separator, join_cmds)]),
             softline!(),
             text!("]")
-        ])
+        ], false, "b")
     }
 
     fn build_from_obj_pattern_property(
@@ -126,8 +126,8 @@ impl<'a> Doc<'a> {
         group!(
             vec![
                 text!("{"),
-                indent!(vec![softline!(), join!(join_separator, join_cmds)]),
-                softline!(),
+                indent!(vec![line!(), join!(join_separator, join_cmds)]),
+                line!(),
                 text!("}")
             ],
             should_break
@@ -152,9 +152,9 @@ impl<'a> Doc<'a> {
         let pattern = self.build_from_pattern(&declarator.id);
 
         if let Some(exp) = &declarator.init {
-            array!(vec![pattern, text![" = "], self.build_from_expression(exp)])
+            group!(vec![pattern, text![" = "], indent!(vec![softline!(), self.build_from_expression(exp)])])
         } else {
-            array!(vec![pattern])
+            group!(vec![pattern])
         }
     }
 
@@ -537,27 +537,28 @@ impl<'a> Doc<'a> {
     }
 
     fn build_from_member_exp(&self, exp: &MemberExpression<'a>) -> Command<'a> {
-        let mut array_cmd = vec![];
+        let mut group_cmd = vec![];
 
-        array_cmd.push(self.build_from_expression(&exp.object));
+        group_cmd.push(self.build_from_expression(&exp.object));
+        group_cmd.push(softline!());
 
         if exp.computed {
             if exp.optional {
-                array_cmd.push(text!("?."));
+                group_cmd.push(text!("?."));
             }
 
-            array_cmd.push(text!("["));
-            array_cmd.push(self.build_from_expression(&exp.property));
-            array_cmd.push(text!("]"));
+            group_cmd.push(text!("["));
+            group_cmd.push(self.build_from_expression(&exp.property));
+            group_cmd.push(text!("]"));
         } else {
             if exp.optional {
-                array_cmd.push(text!("?"));
+                group_cmd.push(text!("?"));
             }
-            array_cmd.push(text!("."));
-            array_cmd.push(self.build_from_expression(&exp.property));
+            group_cmd.push(text!("."));
+            group_cmd.push(self.build_from_expression(&exp.property));
         }
 
-        array!(array_cmd)
+        group!(group_cmd)
     }
 
     fn build_from_sequence_exp(&self, exp: &SequenceExpression<'a>) -> Command<'a> {
@@ -589,7 +590,7 @@ impl<'a> Doc<'a> {
     }
 
     fn build_from_regular_exp(&self, exp: &Regexp<'a>) -> Command<'a> {
-        todo!()
+        array!(vec![text!("/"), text!(exp.pattern), text!("/"), text!(exp.flag)])
     }
 
     fn build_from_template_literal(&self, exp: &TemplateLiteral<'a>) -> Command<'a> {
