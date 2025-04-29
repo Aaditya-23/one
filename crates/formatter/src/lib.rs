@@ -10,9 +10,10 @@ mod formatter;
 mod utils;
 
 pub fn format_js<'a>(code: &'a str, ast: Vec<'a, Statement<'a>>) -> String {
-    // println!("{:#?}", ast);
+    println!("ast: {:#?}", ast);
     let doc_builder = doc_js::Doc::new(code, ast);
     let mut doc = doc_builder.build();
+    println!("doc: {:#?}", doc);
 
     let fmt_opts = FormatterOptions::default();
     let printer = Printer::new(fmt_opts);
@@ -56,7 +57,7 @@ mod test {
         let fmt_opts = FormatterOptions::default();
         let printer = Printer::new(fmt_opts);
 
-        let code = printer.print(&mut doc);
-        println!("{:#?}", code);
+        let clean_code = printer.print(&mut doc);
+        write("../../data/output.js", clean_code).unwrap();
     }
 }

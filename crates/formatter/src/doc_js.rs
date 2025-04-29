@@ -52,12 +52,16 @@ impl<'a> Doc<'a> {
             }
         }
 
-        group!(vec![
-            text!("["),
-            indent!(vec![softline!(), join!(join_separator, join_cmds)]),
-            softline!(),
-            text!("]")
-        ], false, "b")
+        group!(
+            vec![
+                text!("["),
+                indent!(vec![softline!(), join!(join_separator, join_cmds)]),
+                softline!(),
+                text!("]")
+            ],
+            false,
+            "b"
+        )
     }
 
     fn build_from_obj_pattern_property(
@@ -152,7 +156,11 @@ impl<'a> Doc<'a> {
         let pattern = self.build_from_pattern(&declarator.id);
 
         if let Some(exp) = &declarator.init {
-            group!(vec![pattern, text![" = "], indent!(vec![softline!(), self.build_from_expression(exp)])])
+            group!(vec![
+                pattern,
+                text![" ="],
+                indent!(vec![line!(), self.build_from_expression(exp)])
+            ])
         } else {
             group!(vec![pattern])
         }
@@ -165,13 +173,10 @@ impl<'a> Doc<'a> {
         let kind = declaration.kind.as_str();
         let mut array_cmd = vec![text!(kind), text!(" ")];
 
-        let mut it = declaration.declarations.iter();
-
         let join_separator = indent!(vec![text!(","), hardline!()]);
-        let mut join_cmds =
-            vec![self.build_from_variable_declarator(unsafe { it.next().unwrap_unchecked() })];
+        let mut join_cmds = vec![];
 
-        for declarator in it {
+        for declarator in declaration.declarations.iter() {
             join_cmds.push(self.build_from_variable_declarator(declarator))
         }
 
@@ -590,7 +595,12 @@ impl<'a> Doc<'a> {
     }
 
     fn build_from_regular_exp(&self, exp: &Regexp<'a>) -> Command<'a> {
-        array!(vec![text!("/"), text!(exp.pattern), text!("/"), text!(exp.flag)])
+        array!(vec![
+            text!("/"),
+            text!(exp.pattern),
+            text!("/"),
+            text!(exp.flag)
+        ])
     }
 
     fn build_from_template_literal(&self, exp: &TemplateLiteral<'a>) -> Command<'a> {

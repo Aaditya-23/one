@@ -24,7 +24,6 @@ pub enum Command<'a> {
     Array(Vec<Command<'a>>),
     Indent(Vec<Command<'a>>),
     Dedent(Vec<Command<'a>>),
-    Join(Box<Command<'a>>, Vec<Command<'a>>),
     Text(&'a str),
     Line,
     Softline,
@@ -42,7 +41,6 @@ impl Clone for Command<'_> {
             }
             Command::Indent(cmds) => Command::Indent(cmds.clone()),
             Command::Dedent(cmds) => Command::Dedent(cmds.clone()),
-            Command::Join(sep, cmds) => Command::Join(sep.clone(), cmds.clone()),
             Command::Text(text) => Command::Text(text),
             Command::Softline => Command::Softline,
             Command::Line => Command::Line,
@@ -83,9 +81,22 @@ macro_rules! array {
 
 #[macro_export]
 macro_rules! join {
-    ($sep:expr, $cmds:expr) => {
-        Command::Join(Box::new($sep), $cmds)
-    };
+    ($sep:expr, $cmds:expr) => {{
+        let mut array_cmd = vec![];
+
+        let mut it = $cmds.into_iter();
+
+        if let Some(cmd) = it.next(){
+            array_cmd.push(cmd);
+        }
+
+        it.for_each(|cmd| {
+            array_cmd.push($sep.clone());
+            array_cmd.push(cmd);
+        });
+
+        Command::Array(array_cmd)
+    }};
 }
 
 #[macro_export]
