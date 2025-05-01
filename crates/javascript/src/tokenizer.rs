@@ -861,17 +861,24 @@ impl<'a> Tokenizer<'a> {
             match ctx {
                 LexContext::Normal => {
                     self.consume_whitespaces_and_newline();
-                    start = self.index;
-                    kind = self.get_token();
+
+                    if self.index >= self.code.len() {
+                        kind = Kind::EOF;
+                        start = self.index;
+                        end = start + 1;
+                    } else {
+                        start = self.index;
+                        kind = self.get_token();
+                        end = self.index;
+                    }
                 }
 
                 LexContext::Template => {
                     start = self.index;
                     kind = self.lex_template_literal();
+                    end = self.index;
                 }
             }
-
-            end = self.index;
         }
 
         Token {

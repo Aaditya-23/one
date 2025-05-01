@@ -1819,43 +1819,6 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    pub fn parse_import_expression(&mut self) -> Statement<'a> {
-        let start = self.token.start;
-
-        // skip import
-        self.bump();
-
-        let callee = Expression::Import(Box::new_in(
-            Import {
-                start,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ));
-
-        let arguments = self.parse_function_arguments();
-
-        let exp = Expression::CallExpression(Box::new_in(
-            CallExpression {
-                start,
-                callee,
-                arguments,
-                optional: false,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ));
-
-        Statement::ExpressionStatement(Box::new_in(
-            ExpressionStatement {
-                start,
-                exp,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ))
-    }
-
     pub fn parse_default_import_specifier(&mut self) -> ImportSpecifierType<'a> {
         let start = self.token.start;
 
@@ -1947,10 +1910,6 @@ impl<'a> Parser<'a> {
     pub fn parse_import_declaration(&mut self) -> Statement<'a> {
         let start = self.token.start;
 
-        if self.kind(Kind::ParenO) {
-            return self.parse_import_expression();
-        }
-
         // skip import
         self.bump();
 
@@ -2001,6 +1960,16 @@ impl<'a> Parser<'a> {
             },
             self.arena,
         ))
+    }
+
+    pub fn parse_export_declaration(&mut self) -> Statement<'a> {
+        let start = self.token.start;
+
+        // skip export
+        self.bump();
+
+        
+        
     }
 
     pub fn parse_block(&mut self) -> Block<'a> {
@@ -2552,10 +2521,10 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_statement(&mut self) -> Statement<'a> {
-        match self.token.kind {
+        let statement = match self.token.kind {
             Kind::Const | Kind::Let | Kind::Var => self.parse_variable_declaration(),
             Kind::Import => self.parse_import_declaration(),
-            Kind::Export => todo!(),
+            Kind::Export => self.parse_export_declaration(),
             Kind::Function => self.parse_function_declaration(),
             Kind::Class => self.parse_class_declaration(),
             Kind::BracesO => self.parse_block_statement(),
@@ -2583,7 +2552,13 @@ impl<'a> Parser<'a> {
                 }
             }
             _ => self.parse_expression_statement(),
+        };
+
+        if self.kind(Kind::Semicolon) {
+            self.bump()
         }
+
+        statement
     }
 
     pub fn parse(&mut self) -> Vec<'a, Statement<'a>> {

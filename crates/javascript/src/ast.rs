@@ -646,6 +646,29 @@ pub struct ImportDeclaration<'a> {
 }
 
 #[derive(Debug, CloneIn)]
+pub enum ExportDeclarationType<'a> {
+    Variable(Box<'a, VariableDeclaration<'a>>),
+    Function(Box<'a, Function<'a>>),
+    Class(Box<'a, Class<'a>>),
+}
+
+#[derive(Debug, CloneIn)]
+pub struct ExportSpecifier(){
+    pub start: u32,
+    
+    pub end: u32
+}
+
+#[derive(Debug, CloneIn)]
+pub struct ExportNamedDeclaration<'a> {
+    pub start: u32,
+    pub declaration: Option<ExportDeclarationType<'a>>,
+    pub specifiers: Vec<'a, ExportSpecifier<'a>>,
+    pub source: Option<StringLiteral>,
+    pub end: u32,
+}
+
+#[derive(Debug, CloneIn)]
 pub struct MetaProperty {
     pub start: u32,
     pub meta: Identifier,
@@ -824,7 +847,7 @@ pub enum Statement<'a> {
     FunctionDeclaration(Box<'a, Function<'a>>),
     ClassDeclaration(Box<'a, Class<'a>>),
     ImportDeclaration(Box<'a, ImportDeclaration<'a>>),
-    // ExportDeclaration(Box<'a, ExportDeclaration<'a>>),
+    ExportDeclaration(Box<'a, ExportDeclaration<'a>>),
 
     // Statements
     ExpressionStatement(Box<'a, ExpressionStatement<'a>>),
