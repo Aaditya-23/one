@@ -696,6 +696,7 @@ impl<'a> Tokenizer<'a> {
             b"assert" => Kind::Assert,
 
             b"break" => Kind::Break,
+            b"boolean" => Kind::TypeBoolean,
 
             b"case" => Kind::Case,
             b"catch" => Kind::Catch,
@@ -725,11 +726,13 @@ impl<'a> Tokenizer<'a> {
             b"in" => Kind::In,
             b"instanceof" => Kind::Instanceof,
             b"import" => Kind::Import,
+            b"interface" => Kind::Interface,
 
             b"let" => Kind::Let,
 
             b"new" => Kind::New,
             b"null" => Kind::Null,
+            b"number" => Kind::TypeNumber,
 
             b"return" => Kind::Return,
 
@@ -737,12 +740,15 @@ impl<'a> Tokenizer<'a> {
             b"switch" => Kind::Switch,
             b"static" => Kind::Static,
             b"set" => Kind::Set,
+            b"satisfies" => Kind::Satisfies, 
+            b"string" => Kind::TypeString,
 
             b"this" => Kind::This,
             b"typeof" => Kind::Typeof,
             b"throw" => Kind::Throw,
             b"try" => Kind::Try,
             b"true" => Kind::Boolean,
+            b"type" => Kind::Type, 
 
             b"var" => Kind::Var,
             b"void" => Kind::Void,
@@ -820,13 +826,13 @@ impl<'a> Tokenizer<'a> {
             Pipe => self.resolve_pipe(),
             Question => self.resolve_question(),
             Bang => self.resolve_bang(),
-            LessThan => self.resolve_less_than(),
             GreaterThan => self.resolve_greater_than(),
             Equal => self.resolve_equal(),
             Caret => self.resolve_caret(),
             Identifier | Dollar => self.resolve_identifier(),
             Quote => self.resolve_string_literal(),
 
+            LessThan => self.eat_byte(Kind::LessThan),
             Backquote => self.eat_byte(Kind::BackQuote),
             Comma => self.eat_byte(Kind::Comma),
             ParenO => self.eat_byte(Kind::ParenO),

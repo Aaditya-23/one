@@ -3,35 +3,64 @@ use bumpalo::{boxed::Box, collections::Vec, Bump};
 use crate::{
     allocator::CloneIn,
     ast::{
-        ArrayExpression, ArrayPattern, ArrayPatternKind, ArrowFunction, ArrowFunctionBody,
-        AssignmentExpression, AssignmentExpressionLHS, AssignmentOperator, AssignmentPattern,
-        AwaitExpression, BinaryExpression, BinaryOperator, Block, BooleanLiteral, BreakStatement,
-        CallExpression, CatchClause, Class, ClassBody, ClassMethod, ClassProperty,
-        ConditionalExpression, ContinueStatement, DebuggerStatement, DoWhileLoop, Elision,
-        EmptyStatement, Expression, ExpressionStatement, ForInLoop, ForInLoopLeft, ForLoop,
-        ForLoopInit, Function, FunctionParams, Identifier, IdentifierOrLiteral, IfStatement,
-        Import, ImportAttribute, ImportDeclaration, ImportDefaultSpecifier,
-        ImportNamespaceSpecifier, ImportSpecifier, ImportSpecifierType, LabelledStatement,
-        Location, LogicalExpression, LogicalOperator, MemberExpression, MethodDefinitionKind,
-        NewExpression, NullLiteral, NumericLiteral, ObjectExpression, ObjectExpressionProperty,
-        ObjectExpressionPropertyKind, ObjectPattern, ObjectPatternProperty,
-        ObjectPatternPropertyKind, Pattern, PropertyKind, Regexp, RestElement, ReturnStatement,
-        SequenceExpression, SpreadElement, Statement, StringLiteral, SwitchCase, SwitchStatement,
-        TemplateElement, TemplateLiteral, ThisExpression, ThrowStatement, TryStatement,
-        UnaryExpression, UnaryOperator, UpdateExpression, UpdateOperator, VariableDeclaration,
-        VariableDeclarationKind, VariableDeclarator, WhileLoop, WithStatement, AST,
+        javascript::{
+            ArrayExpression, ArrayPattern, ArrayPatternKind, ArrowFunction, ArrowFunctionBody,
+            AssignmentExpression, AssignmentExpressionLHS, AssignmentOperator, AssignmentPattern,
+            AwaitExpression, BinaryExpression, BinaryOperator, Block, BooleanLiteral,
+            BreakStatement, CallExpression, CatchClause, Class, ClassBody, ClassMethod,
+            ClassProperty, ConditionalExpression, ContinueStatement, DebuggerStatement,
+            Declaration, DoWhileLoop, Elision, EmptyStatement, ExportAllDeclaration,
+            ExportDefaultDeclaration, ExportNamedDeclaration, ExportSpecifier, Expression,
+            ExpressionStatement, ForInLoop, ForInLoopLeft, ForLoop, ForLoopInit, Function,
+            FunctionParams, Identifier, IdentifierOrLiteral, IfStatement, Import, ImportAttribute,
+            ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier,
+            ImportSpecifierType, LabelledStatement, Location, LogicalExpression, LogicalOperator,
+            MemberExpression, MetaProperty, MethodDefinitionKind, NewExpression, NullLiteral,
+            NumericLiteral, ObjectExpression, ObjectExpressionMethod, ObjectExpressionMethodKind,
+            ObjectExpressionProperty, ObjectExpressionPropertyKind, ObjectPattern,
+            ObjectPatternProperty, ObjectPatternPropertyKind, Pattern,  Regexp,
+            RestElement, ReturnStatement, SequenceExpression, SpreadElement, Statement,
+            StringLiteral, SwitchCase, SwitchStatement, TaggedTemplateLiteral, TemplateElement,
+            TemplateLiteral, ThisExpression, ThrowStatement, TryStatement, UnaryExpression,
+            UnaryOperator, UpdateExpression, UpdateOperator, VariableDeclaration,
+            VariableDeclarationKind, VariableDeclarator, WhileLoop, WithStatement,
+        },
+        typescript::{
+            TsTypeAnnotation, TsTypeAny, TsTypeBoolean, TsTypeLiteral, TsTypeNull, TsTypeNumber,
+            TsTypeOperator, TsTypeOperatorKind, TsTypeReference, TsTypeString, TsTypeTuple,
+            TsTypeUndefined,
+        },
     },
     kind::Kind,
     tokenizer::{LexContext, Token, Tokenizer},
 };
 
+pub struct ParserContext {
+    pub in_method_type_declaration: bool,
+}
+
+impl Default for ParserContext {
+    fn default() -> Self {
+        Self {
+            in_method_type_declaration: false,
+        }
+    }
+}
+
+pub struct Extensions {
+    pub ts: bool,
+    pub jsx: bool,
+}
+
 pub struct Parser<'a> {
     code: &'a str,
     lexer: Tokenizer<'a>,
-    token: Token,
-    prev_token_end: u32,
-    in_paren: bool,
-    arena: &'a Bump,
+    pub(crate) ctx: ParserContext,
+    pub(crate) token: Token,
+    pub(crate) prev_token_end: u32,
+    pub(crate) in_paren: bool,
+    pub(crate) arena: &'a Bump,
+    extensions: Extensions,
 }
 
 impl<'a> Parser<'a> {
@@ -164,14 +193,19 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_identifier(&mut self) -> Identifier {
+    pub fn is_curr_token_identifier(&self) -> bool {
+        is_identifier(self.token.kind)
+    }
+
+    pub fn parse_identifier(&mut self) -> Identifier<'a> {
         let start = self.token.start;
         self.bump();
 
         Identifier {
             start,
-            end: self.prev_token_end,
             parenthesized: self.in_paren,
+            type_annotation: None,
+            end: self.prev_token_end,
         }
     }
 
@@ -180,6 +214,10 @@ impl<'a> Parser<'a> {
         let pattern = self.parse_pattern();
 
         if self.kind(Kind::Equal) {
+            if self.ctx.in_method_type_declaration {
+                panic!("invalid token kind")
+            }
+
             self.bump();
             let right = self.parse_assignment_expression();
 
@@ -216,8 +254,14 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_identifier_pattern(&mut self) -> Pattern<'a> {
-        let identifier = self.parse_identifier();
-        Pattern::IdentifierPattern(Box::new_in(identifier, self.arena))
+        let mut identifier = self.parse_identifier();
+
+        if self.extensions.ts && self.kind(Kind::Colon) {
+            self.bump();
+            identifier.type_annotation = Some(self.parse_type_annotation())
+        }
+
+        Pattern::Identifier(Box::new_in(identifier, self.arena))
     }
 
     pub fn parse_array_pattern(&mut self) -> Pattern<'a> {
@@ -254,10 +298,18 @@ impl<'a> Parser<'a> {
 
         self.expect(Kind::BracketC);
 
+        let type_annotation = if self.extensions.ts && self.kind(Kind::Colon) {
+            self.bump();
+            Some(self.parse_type_annotation())
+        } else {
+            None
+        };
+
         Pattern::ArrayPattern(Box::new_in(
             ArrayPattern {
                 start,
                 elements,
+                type_annotation,
                 end: self.prev_token_end,
             },
             self.arena,
@@ -294,7 +346,7 @@ impl<'a> Parser<'a> {
                 value = Pattern::AssignmentPattern(Box::new_in(
                     AssignmentPattern {
                         start,
-                        left: Pattern::IdentifierPattern(Box::new_in(id, self.arena)),
+                        left: Pattern::Identifier(Box::new_in(id, self.arena)),
                         right,
                         end: self.prev_token_end,
                     },
@@ -307,7 +359,7 @@ impl<'a> Parser<'a> {
                 value = self.parse_pattern_with_default_value();
                 shorthand = false;
             } else {
-                value = Pattern::IdentifierPattern(Box::new_in(id, self.arena));
+                value = Pattern::Identifier(Box::new_in(id, self.arena));
                 shorthand = true;
             }
 
@@ -348,10 +400,18 @@ impl<'a> Parser<'a> {
 
         self.expect(Kind::BracesC);
 
+        let type_annotation = if self.extensions.ts && self.kind(Kind::Colon) {
+            self.bump();
+            Some(self.parse_type_annotation())
+        } else {
+            None
+        };
+
         Pattern::ObjectPattern(Box::new_in(
             ObjectPattern {
                 start,
                 properties,
+                type_annotation,
                 end: self.prev_token_end,
             },
             self.arena,
@@ -369,7 +429,7 @@ impl<'a> Parser<'a> {
 
     pub fn reinterpret_as_pattern(&mut self, exp: Expression<'a>) -> Pattern<'a> {
         match exp {
-            Expression::Identifier(id) => Pattern::IdentifierPattern(id),
+            Expression::Identifier(id) => Pattern::Identifier(id),
             Expression::ArrayExpression(array) => {
                 let mut elements = Vec::new_in(self.arena);
                 array.elements.iter().for_each(|el| match el {
@@ -397,6 +457,8 @@ impl<'a> Parser<'a> {
                     ArrayPattern {
                         start: array.start,
                         elements,
+                        // todo: check type annotation later
+                        type_annotation: None,
                         end: array.end,
                     },
                     self.arena,
@@ -443,6 +505,8 @@ impl<'a> Parser<'a> {
                     ObjectPattern {
                         start: object.start,
                         properties,
+                        // todo: check type annotation later
+                        type_annotation: None,
                         end: object.end,
                     },
                     self.arena,
@@ -769,87 +833,214 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    pub fn parse_object_property_method(&mut self, is_async: bool) -> Expression<'a> {
+    pub fn parse_object_expression_method(
+        &mut self,
+        is_async: bool,
+        is_generator: bool,
+        method_kind: ObjectExpressionMethodKind,
+    ) -> ObjectExpressionPropertyKind<'a> {
         let start = self.token.start;
+
+        let (id, is_computed);
+
+        if self.kind(Kind::BracketO) {
+            self.bump();
+            id = self.parse_assignment_expression();
+            is_computed = true;
+            self.expect(Kind::BracketC);
+        } else {
+            assert!(self.is_curr_token_identifier(), "expected identifier");
+            id = Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
+            is_computed = false;
+        }
+
+        let type_parameters = if self.extensions.ts && self.kind(Kind::LessThan) {
+            Some(self.parse_type_parameter_declaration())
+        } else {
+            None
+        };
+
         let params = self.parse_function_parameters();
         let body = self.parse_block();
 
-        Expression::FunctionExpression(Box::new_in(
-            Function {
+        ObjectExpressionPropertyKind::Method(Box::new_in(
+            ObjectExpressionMethod {
                 start,
-                id: None,
+                async_: is_async,
+                generator: is_generator,
+                computed: is_computed,
+                id,
                 params,
                 body,
-                generator: false,
-                async_: is_async,
+                type_parameters,
+                kind: method_kind,
                 end: self.prev_token_end,
             },
             self.arena,
         ))
     }
 
-    pub fn parse_object_expression_property(&mut self) -> ObjectExpressionProperty<'a> {
+    pub fn parse_object_expression_property_or_method(
+        &mut self,
+    ) -> ObjectExpressionPropertyKind<'a> {
         let start = self.token.start;
 
-        let (is_computed, is_shorthand, is_method, kind, value);
-        let key;
+        let mut async_token = None;
 
-        if matches!(
-            self.token.kind,
-            Kind::Identifier
-                | Kind::Case
-                | Kind::Default
-                | Kind::In
-                | Kind::As
-                | Kind::Number
-                | Kind::String
-                | Kind::From
-        ) {
-            key = Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
-            is_computed = false;
-        } else if self.kind(Kind::BracketO) {
+        if self.kind(Kind::Async) {
+            async_token = Some(self.token.clone());
             self.bump();
-            key = self.parse_assignment_expression();
-            self.expect(Kind::BracketC);
-            is_computed = true
-        } else {
-            panic!(
-                "invalid token kind {:?} {}",
-                self.token.kind, self.lexer.line_number
+        }
+
+        if self.kind(Kind::Star) {
+            self.bump();
+
+            return self.parse_object_expression_method(
+                async_token.is_some(),
+                true,
+                ObjectExpressionMethodKind::Method,
             );
         }
 
-        if self.kind(Kind::Colon) {
-            self.bump();
+        if matches!(self.token.kind, Kind::Get | Kind::Set) {
+            let peeked_token = self.lexer.peek(LexContext::Normal).kind;
 
-            value = self.parse_assignment_expression();
-            is_shorthand = false;
-            is_method = false;
-            kind = PropertyKind::Init;
-        } else if self.kind(Kind::ParenO) {
-            is_method = true;
-            is_shorthand = false;
-            kind = PropertyKind::Init;
+            if peeked_token == Kind::BracketO || is_identifier(peeked_token) {
+                if async_token.is_some() {
+                    panic!("invalid token kind");
+                }
 
-            value = self.parse_object_property_method(false);
-        } else if is_computed {
-            panic!("invalid token kind")
-        } else {
-            value = key.clone_in(self.arena);
-            is_shorthand = true;
-            is_method = false;
-            kind = PropertyKind::Init
+                let method_kind = if self.token.kind == Kind::Get {
+                    ObjectExpressionMethodKind::Get
+                } else {
+                    ObjectExpressionMethodKind::Set
+                };
+
+                self.bump();
+
+                return self.parse_object_expression_method(false, false, method_kind);
+            }
         }
 
-        ObjectExpressionProperty {
-            start,
-            computed: is_computed,
-            shorthand: is_shorthand,
-            method: is_method,
-            kind,
-            key,
-            value,
-            end: self.prev_token_end,
+        if self.is_curr_token_identifier() {
+            if async_token.is_some() {
+                return self.parse_object_expression_method(
+                    true,
+                    false,
+                    ObjectExpressionMethodKind::Method,
+                );
+            } else {
+                let key = Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
+
+                let (value, is_shorthand);
+
+                if self.kind(Kind::Colon) {
+                    self.bump();
+                    value = self.parse_assignment_expression();
+                    is_shorthand = false;
+                } else {
+                    value = key.clone_in(self.arena);
+                    is_shorthand = true;
+                }
+
+                ObjectExpressionPropertyKind::Property(Box::new_in(
+                    ObjectExpressionProperty {
+                        start,
+                        computed: false,
+                        shorthand: is_shorthand,
+                        key,
+                        value,
+                        end: self.prev_token_end,
+                    },
+                    self.arena,
+                ))
+            }
+        } else if self.kind(Kind::BracketO) {
+            if async_token.is_some() {
+                return self.parse_object_expression_method(
+                    true,
+                    false,
+                    ObjectExpressionMethodKind::Method,
+                );
+            } else {
+                self.bump();
+                let key = self.parse_assignment_expression();
+                self.expect(Kind::BracketC);
+
+                if self.kind(Kind::ParenO) || (self.extensions.ts && self.kind(Kind::LessThan)) {
+                    return self.parse_object_expression_method(
+                        false,
+                        false,
+                        ObjectExpressionMethodKind::Method,
+                    );
+                }
+
+                let (value, is_shorthand);
+
+                if self.kind(Kind::Colon) {
+                    self.bump();
+                    value = self.parse_assignment_expression();
+                    is_shorthand = false;
+                } else {
+                    value = key.clone_in(self.arena);
+                    is_shorthand = true;
+                }
+
+                ObjectExpressionPropertyKind::Property(Box::new_in(
+                    ObjectExpressionProperty {
+                        start,
+                        computed: true,
+                        shorthand: is_shorthand,
+                        key,
+                        value,
+                        end: self.prev_token_end,
+                    },
+                    self.arena,
+                ))
+            }
+        } else if let Some(token) = async_token {
+            let key = Expression::Identifier(Box::new_in(
+                Identifier {
+                    start: token.start,
+                    parenthesized: false,
+                    type_annotation: None,
+                    end: token.end,
+                },
+                self.arena,
+            ));
+
+            if self.kind(Kind::ParenO) || (self.extensions.ts && self.kind(Kind::LessThan)) {
+                return self.parse_object_expression_method(
+                    true,
+                    false,
+                    ObjectExpressionMethodKind::Method,
+                );
+            }
+
+            let (value, is_shorthand);
+
+            if self.kind(Kind::Colon) {
+                self.bump();
+                value = self.parse_assignment_expression();
+                is_shorthand = false;
+            } else {
+                value = key.clone_in(self.arena);
+                is_shorthand = true;
+            }
+
+            ObjectExpressionPropertyKind::Property(Box::new_in(
+                ObjectExpressionProperty {
+                    start,
+                    computed: false,
+                    shorthand: is_shorthand,
+                    key,
+                    value,
+                    end: self.prev_token_end,
+                },
+                self.arena,
+            ))
+        } else {
+            panic!("invalid token kind");
         }
     }
 
@@ -869,9 +1060,9 @@ impl<'a> Parser<'a> {
 
                 properties.push(ObjectExpressionPropertyKind::SpreadElement(el));
             } else {
-                let property = Box::new_in(self.parse_object_expression_property(), self.arena);
+                let property_or_method = self.parse_object_expression_property_or_method();
 
-                properties.push(ObjectExpressionPropertyKind::Property(property));
+                properties.push(property_or_method);
             }
 
             if !self.kind(Kind::BracesC) {
@@ -929,150 +1120,171 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_class_element(&mut self) -> ClassBody<'a> {
-        todo!()
-        // let start = self.token.start;
+        let start = self.token.start;
 
-        // if self.kind(Kind::Constructor) {
-        //     self.bump();
+        if self.kind(Kind::Constructor) {
+            let key = Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
+            let params = self.parse_function_parameters();
+            let body = self.parse_block();
 
-        //     let params = self.parse_function_parameters();
-        //     let body = self.parse_block();
+            return ClassBody::MethodDefinition(Box::new_in(
+                ClassMethod {
+                    start,
+                    static_: false,
+                    computed: false,
+                    generator: false,
+                    async_: false,
+                    key,
+                    params,
+                    body,
+                    kind: MethodDefinitionKind::Constructor,
+                    end: self.prev_token_end,
+                },
+                self.arena,
+            ));
+        }
 
-        //     let key = Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
+        let (mut static_token, mut async_token) = (None, None);
+        let mut is_computed = false;
+        let key;
 
-        //     return ClassBody::MethodDefinition(Box::new_in(
-        //         ClassMethod {
-        //             start,
-        //             computed: false,
-        //             static_: false,
-        //             async_: false,
-        //             generator: false,
-        //             key,
-        //             params,
-        //             body,
-        //             kind: MethodDefinitionKind::Constructor,
-        //             end: self.prev_token_end,
-        //         },
-        //         self.arena,
-        //     ));
-        // } else {
-        //     let (key, is_static, definition_kind, is_computed, is_generator);
+        if self.kind(Kind::Static) {
+            static_token = Some(self.token.clone());
+            self.bump();
+        }
 
-        //     let async_identifier;
+        if self.kind(Kind::Async) {
+            async_token = Some(self.token.clone());
+            self.bump();
+        }
 
-        //     let ctx  = LexContext::Normal;
+        if async_token.is_none() && matches!(self.token.kind, Kind::Get | Kind::Set) {
+            let peeked_token = self.lexer.peek(LexContext::Normal).kind;
 
-        //     is_static = if self.kind(Kind::Static) {
-        //         self.bump();
-        //         true
-        //     } else {
-        //         false
-        //     };
+            if peeked_token == Kind::BracketO || is_identifier(peeked_token) {
+                let definition_kind = if self.kind(Kind::Get) {
+                    MethodDefinitionKind::Get
+                } else {
+                    MethodDefinitionKind::Set
+                };
 
-        //     async_identifier = if self.kind(Kind::Async)  {
-        //        Some(self.parse_identifier())
-        //     } else {
-        //         None
-        //     };
+                self.bump();
 
-        //     is_generator = if self.kind(Kind::Star) {
-        //         self.bump();
-        //         true
-        //     } else {
-        //         false
-        //     };
+                if self.kind(Kind::BracketO) {
+                    self.bump();
+                    is_computed = true;
 
-        //     if self.kind(Kind::BracketO) {
-        //         is_computed = true;
-        //         definition_kind = MethodDefinitionKind::Method;
+                    key = self.parse_assignment_expression();
+                    self.expect(Kind::BracketC);
+                } else {
+                    key = Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
+                }
 
-        //         // skip [
-        //         self.bump();
+                let params = self.parse_function_parameters();
+                let body = self.parse_block();
 
-        //         key = self.parse_assignment_expression();
+                return ClassBody::MethodDefinition(Box::new_in(
+                    ClassMethod {
+                        start,
+                        static_: static_token.is_some(),
+                        computed: is_computed,
+                        generator: false,
+                        async_: false,
+                        key,
+                        params,
+                        body,
+                        kind: definition_kind,
+                        end: self.prev_token_end,
+                    },
+                    self.arena,
+                ));
+            }
+        }
 
-        //         self.expect(Kind::BracketC);
-        //     } else {
-        //         let peeked = self.lexer.peek(ctx).kind;
+        if self.is_curr_token_identifier() {
+            key = Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
 
-        //         if matches!(self.token.kind, Kind::Get | Kind::Set) && peeked != Kind::ParenC {
-        //             definition_kind = match self.token.kind {
-        //                 Kind::Get => MethodDefinitionKind::Get,
-        //                 Kind::Set => MethodDefinitionKind::Set,
-        //                 _ => unsafe { core::hint::unreachable_unchecked() },
-        //             };
+            if async_token.is_some() && !self.kind(Kind::ParenO) {
+                panic!("invalid token")
+            }
+        } else if self.kind(Kind::BracketO) {
+            is_computed = true;
+            self.bump();
 
-        //             if async_identifier.is_some() || is_generator {
-        //                 panic!("invalid token kind");
-        //             }
+            key = self.parse_assignment_expression();
+            self.expect(Kind::BracketC);
 
-        //             self.bump();
+            if async_token.is_some() && !self.kind(Kind::ParenO) {
+                panic!("invalid token")
+            }
+        } else if let Some(token) = async_token {
+            key = Expression::Identifier(Box::new_in(
+                Identifier {
+                    start: token.start,
+                    parenthesized: false,
+                    type_annotation: None,
+                    end: token.end,
+                },
+                self.arena,
+            ));
 
-        //             if self.kind(Kind::BracketO) {
-        //                 is_computed = true;
-        //                 self.bump();
+            async_token = None;
+        } else if let Some(token) = static_token {
+            key = Expression::Identifier(Box::new_in(
+                Identifier {
+                    start: token.start,
+                    parenthesized: false,
+                    type_annotation: None,
+                    end: token.end,
+                },
+                self.arena,
+            ));
 
-        //                 key = self.parse_assignment_expression();
+            static_token = None;
+        } else {
+            panic!("invalid token")
+        }
 
-        //                 self.expect(Kind::BracketC);
-        //             } else {
-        //                 is_computed = false;
-        //                 key = Expression::Identifier(Box::new_in(
-        //                     self.parse_identifier(),
-        //                     self.arena,
-        //                 ));
-        //             }
-        //         } else {
-        //             definition_kind = MethodDefinitionKind::Method;
-        //             is_computed = false;
+        if self.kind(Kind::ParenO) {
+            let params = self.parse_function_parameters();
+            let body = self.parse_block();
 
-        //                 key =
-        //                 Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
-        //         }
-        //     };
+            return ClassBody::MethodDefinition(Box::new_in(
+                ClassMethod {
+                    start,
+                    static_: static_token.is_some(),
+                    computed: is_computed,
+                    generator: false,
+                    async_: async_token.is_some(),
+                    key,
+                    params,
+                    body,
+                    kind: MethodDefinitionKind::Method,
+                    end: self.prev_token_end,
+                },
+                self.arena,
+            ));
+        }
 
-        //     if self.kind(Kind::ParenO) && !self.token.is_on_new_line {
-        //         let params = self.parse_function_parameters();
-        //         let body = self.parse_block();
+        let value;
 
-        //         ClassBody::MethodDefinition(Box::new_in(
-        //             ClassMethod {
-        //                 start,
-        //                 computed: is_computed,
-        //                 static_: is_static,
-        //                 async_: async_identifier.is_some(),
-        //                 generator: is_generator,
-        //                 key,
-        //                 params,
-        //                 body,
-        //                 kind: definition_kind,
-        //                 end: self.prev_token_end,
-        //             },
-        //             self.arena,
-        //         ))
-        //     } else {
-        //         let value;
+        if self.kind(Kind::Equal) {
+            value = Some(self.parse_assignment_expression());
+        } else {
+            value = None;
+        }
 
-        //         if self.kind(Kind::Equal) {
-        //             self.bump();
-        //              value = Some(self.parse_assignment_expression());
-        //         } else {
-        //             value = None;
-        //         }
-
-        //         ClassBody::PropertyDefinition(Box::new_in(
-        //             ClassProperty {
-        //                 start,
-        //                 computed: is_computed,
-        //                 static_: is_static,
-        //                 key,
-        //                 value,
-        //                 end: self.prev_token_end,
-        //             },
-        //             self.arena,
-        //         ))
-        //     }
-        // }
+        return ClassBody::PropertyDefinition(Box::new_in(
+            ClassProperty {
+                start,
+                key,
+                value,
+                computed: is_computed,
+                static_: static_token.is_some(),
+                end: self.prev_token_end,
+            },
+            self.arena,
+        ));
     }
 
     pub fn parse_class_body(&mut self) -> Vec<'a, ClassBody<'a>> {
@@ -1216,16 +1428,45 @@ impl<'a> Parser<'a> {
         ))
     }
 
+    pub fn parse_super(&mut self) -> Expression<'a> {
+        let exp = Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
+
+        if matches!(self.token.kind, Kind::ParenO | Kind::Dot | Kind::BracketO) {
+            return exp;
+        }
+
+        panic!("invalid token")
+    }
+
     pub fn parse_new_expression(&mut self) -> Expression<'a> {
         let start = self.token.start;
+
+        let token = self.token.clone();
 
         // skip new
         self.bump();
 
         if self.kind(Kind::Dot) {
-            // new.target
+            self.bump();
 
-            todo!()
+            let meta = Identifier {
+                start: token.start,
+                parenthesized: false,
+                type_annotation: None,
+                end: token.end,
+            };
+
+            let property = self.parse_identifier();
+
+            Expression::MetaProperty(Box::new_in(
+                MetaProperty {
+                    start,
+                    meta,
+                    property,
+                    end: self.prev_token_end,
+                },
+                self.arena,
+            ))
         } else {
             let callee = self.parse_lhs_expression();
             let arguments = if self.kind(Kind::ParenO) {
@@ -1322,7 +1563,7 @@ impl<'a> Parser<'a> {
                 break;
             } else {
                 params.push(FunctionParams::Pattern(Box::new_in(
-                    self.parse_pattern(),
+                    self.parse_pattern_with_default_value(),
                     self.arena,
                 )));
             }
@@ -1365,6 +1606,12 @@ impl<'a> Parser<'a> {
             panic!("function id is required");
         }
 
+        let type_parameters = if self.extensions.ts && self.kind(Kind::LessThan) {
+            Some(self.parse_type_parameter_declaration())
+        } else {
+            None
+        };
+
         let params = self.parse_function_parameters();
         let body = self.parse_block();
 
@@ -1375,6 +1622,7 @@ impl<'a> Parser<'a> {
             id,
             params,
             body,
+            type_parameters,
             end: self.prev_token_end,
         }
     }
@@ -1414,7 +1662,7 @@ impl<'a> Parser<'a> {
         let (maybe_async, prev_line_number) = (self.kind(Kind::Async), self.lexer.line_number);
 
         let mut exp = match self.token.kind {
-            Kind::Super => todo!(),
+            Kind::Super => self.parse_super(),
             Kind::New => self.parse_new_expression(),
             _ => self.parse_primary_expression(),
         };
@@ -1502,7 +1750,20 @@ impl<'a> Parser<'a> {
                     self.arena,
                 ))
             } else if self.kind(Kind::BackQuote) {
-                todo!()
+                let quasi = match self.parse_template_literal() {
+                    Expression::TemplateLiteral(inner) => Box::into_inner(inner),
+                    _ => unsafe { core::hint::unreachable_unchecked() },
+                };
+
+                exp = Expression::TaggedTemplateLiteral(Box::new_in(
+                    TaggedTemplateLiteral {
+                        start: exp.start(),
+                        tag: exp,
+                        quasi,
+                        end: self.prev_token_end,
+                    },
+                    self.arena,
+                ))
             } else {
                 break;
             }
@@ -1778,9 +2039,9 @@ impl<'a> Parser<'a> {
         };
 
         VariableDeclarator {
+            start,
             id,
             init,
-            start,
             end: self.prev_token_end,
         }
     }
@@ -1901,7 +2162,47 @@ impl<'a> Parser<'a> {
         let mut assertions = Vec::new_in(self.arena);
 
         if self.kind(Kind::Assert) {
-            todo!()
+            self.bump();
+
+            self.expect(Kind::BracesO);
+
+            while !matches!(self.token.kind, Kind::EOF | Kind::BracesC) {
+                let start = self.token.start;
+                let (key, value);
+
+                key = if self.kind(Kind::Identifier) {
+                    IdentifierOrLiteral::Identifier(Box::new_in(
+                        self.parse_identifier(),
+                        self.arena,
+                    ))
+                } else if self.kind(Kind::String) {
+                    IdentifierOrLiteral::Literal(Box::new_in(
+                        self.parse_string_literal(),
+                        self.arena,
+                    ))
+                } else {
+                    panic!("invalid token")
+                };
+
+                value = if self.kind(Kind::String) {
+                    self.parse_string_literal()
+                } else {
+                    panic!("invalid token")
+                };
+
+                assertions.push(ImportAttribute {
+                    start,
+                    key,
+                    value,
+                    end: self.prev_token_end,
+                });
+
+                if !self.kind(Kind::BracesC) {
+                    self.expect(Kind::Comma);
+                }
+            }
+
+            self.expect(Kind::BracesC);
         }
 
         assertions
@@ -1962,14 +2263,209 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    pub fn parse_export_declaration(&mut self) -> Statement<'a> {
+    pub fn parse_export_all_declaration(&mut self) -> Statement<'a> {
         let start = self.token.start;
 
         // skip export
         self.bump();
 
-        
-        
+        // skip *
+        self.bump();
+
+        let exported;
+
+        if self.kind(Kind::As) {
+            self.bump();
+
+            if self.is_curr_token_identifier() {
+                exported = Some(IdentifierOrLiteral::Identifier(Box::new_in(
+                    self.parse_identifier(),
+                    self.arena,
+                )))
+            } else {
+                exported = Some(IdentifierOrLiteral::Literal(Box::new_in(
+                    self.parse_string_literal(),
+                    self.arena,
+                )))
+            }
+        } else {
+            exported = None;
+        }
+
+        self.expect(Kind::From);
+
+        let source = self.parse_string_literal();
+
+        Statement::ExportAllDeclaration(Box::new_in(
+            ExportAllDeclaration {
+                start,
+                source,
+                exported,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        ))
+    }
+
+    pub fn parse_default_export_declaration(&mut self) -> Statement<'a> {
+        let start = self.token.start;
+
+        // skip export
+        self.bump();
+
+        // skip default
+        self.bump();
+
+        let declaration = match self.token.kind {
+            Kind::Function => {
+                Declaration::Function(Box::new_in(self.parse_function(false), self.arena))
+            }
+            Kind::Class => Declaration::Class(Box::new_in(self.parse_class(false), self.arena)),
+            Kind::Let | Kind::Const | Kind::Var => {
+                let declaration = match self.parse_variable_declaration() {
+                    Statement::VariableDeclaration(v_declaration) => v_declaration,
+                    _ => unsafe { core::hint::unreachable_unchecked() },
+                };
+
+                Declaration::Variable(declaration)
+            }
+            _ => panic!("invalid token"),
+        };
+
+        Statement::ExportDefaultDeclaration(Box::new_in(
+            ExportDefaultDeclaration {
+                start,
+                declaration,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        ))
+    }
+
+    pub fn parse_export_named_declaration(&mut self) -> Statement<'a> {
+        let start = self.token.start;
+
+        // skip export
+        self.bump();
+
+        let declaration = match self.token.kind {
+            Kind::Function => {
+                Declaration::Function(Box::new_in(self.parse_function(false), self.arena))
+            }
+            Kind::Class => Declaration::Class(Box::new_in(self.parse_class(false), self.arena)),
+            Kind::Let | Kind::Const | Kind::Var => {
+                let declaration = match self.parse_variable_declaration() {
+                    Statement::VariableDeclaration(v_declaration) => v_declaration,
+                    _ => unsafe { core::hint::unreachable_unchecked() },
+                };
+
+                Declaration::Variable(declaration)
+            }
+            _ => panic!("invalid token"),
+        };
+
+        Statement::ExportNamedDeclaration(Box::new_in(
+            ExportNamedDeclaration {
+                start,
+                specifiers: Vec::new_in(self.arena),
+                declaration: Some(declaration),
+                source: None,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        ))
+    }
+
+    pub fn parse_export_named_declaration_with_specifiers(&mut self) -> Statement<'a> {
+        let start = self.token.start;
+        let mut specifiers = Vec::new_in(self.arena);
+
+        // skip export
+        self.bump();
+
+        // skip {
+        self.bump();
+
+        while matches!(self.token.kind, Kind::BracesC | Kind::EOF) {
+            let start = self.token.start;
+
+            let (local, exported);
+
+            local = match self.token.kind {
+                Kind::Identifier => IdentifierOrLiteral::Identifier(Box::new_in(
+                    self.parse_identifier(),
+                    self.arena,
+                )),
+                Kind::String => IdentifierOrLiteral::Literal(Box::new_in(
+                    self.parse_string_literal(),
+                    self.arena,
+                )),
+                _ => panic!("invalid token"),
+            };
+
+            if self.kind(Kind::As) {
+                self.bump();
+
+                exported = match self.token.kind {
+                    Kind::Identifier => IdentifierOrLiteral::Identifier(Box::new_in(
+                        self.parse_identifier(),
+                        self.arena,
+                    )),
+                    Kind::String => IdentifierOrLiteral::Literal(Box::new_in(
+                        self.parse_string_literal(),
+                        self.arena,
+                    )),
+                    _ => panic!("invalid token"),
+                };
+            } else {
+                exported = local.clone_in(self.arena);
+            }
+
+            specifiers.push(ExportSpecifier {
+                start,
+                local,
+                exported,
+                end: self.prev_token_end,
+            });
+
+            if !self.kind(Kind::BracesC) {
+                self.expect(Kind::Comma);
+            }
+        }
+
+        self.expect(Kind::BracesC);
+
+        let source;
+
+        if self.kind(Kind::From) {
+            self.bump();
+            source = Some(self.parse_string_literal());
+        } else {
+            source = None;
+        }
+
+        self.expect(Kind::BracesC);
+
+        Statement::ExportNamedDeclaration(Box::new_in(
+            ExportNamedDeclaration {
+                start,
+                declaration: None,
+                specifiers,
+                source,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        ))
+    }
+
+    pub fn parse_export_declaration(&mut self) -> Statement<'a> {
+        match self.token.kind {
+            Kind::Star => self.parse_export_all_declaration(),
+            Kind::Default => self.parse_default_export_declaration(),
+            Kind::Const | Kind::Let | Kind::Var => self.parse_export_named_declaration(),
+            Kind::BracesO => self.parse_export_named_declaration_with_specifiers(),
+            _ => panic!("invalid token"),
+        }
     }
 
     pub fn parse_block(&mut self) -> Block<'a> {
@@ -2541,7 +3037,6 @@ impl<'a> Parser<'a> {
             Kind::Throw => self.parse_throw_statement(),
             Kind::Try => self.parse_try_statement(),
             Kind::With => self.parse_with_statement(),
-            Kind::Identifier => self.parse_labelled_statement(),
             Kind::Async => {
                 let peeked = self.lexer.peek(LexContext::Normal).kind;
 
@@ -2551,11 +3046,22 @@ impl<'a> Parser<'a> {
                     self.parse_labelled_statement()
                 }
             }
+            // Kind::Type if self.extensions.ts => {
+            //     if is_identifier(self.lexer.peek(LexContext::Normal).kind) {
+            //     } else {
+            //         self.parse_labelled_statement()
+            //     }
+            // }
+            Kind::Identifier => self.parse_labelled_statement(),
             _ => self.parse_expression_statement(),
         };
 
         if self.kind(Kind::Semicolon) {
             self.bump()
+        } else if !self.token.is_on_new_line {
+            if !self.kind(Kind::EOF) && !self.kind(Kind::BracesC) {
+                panic!("invalid token");
+            }
         }
 
         statement
@@ -2575,19 +3081,36 @@ impl<'a> Parser<'a> {
         ast
     }
 
-    pub fn new(arena: &'a Bump, code: &'a str) -> Self {
+    pub fn new(arena: &'a Bump, code: &'a str, extensions: Extensions) -> Self {
         let mut lexer = Tokenizer::new(code);
         let token = lexer.lex(LexContext::Normal);
 
         Parser {
             code,
             lexer,
+            ctx: ParserContext::default(),
             token,
             prev_token_end: 0,
             in_paren: false,
             arena,
+            extensions,
         }
     }
+}
+
+pub fn is_identifier(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Identifier
+            | Kind::As
+            | Kind::From
+            | Kind::Boolean
+            | Kind::Async
+            | Kind::Assert
+            | Kind::Constructor
+            | Kind::Get
+            | Kind::Set
+    )
 }
 
 #[cfg(test)]
@@ -2600,7 +3123,15 @@ mod tests {
         let code = read_to_string("../../data/input.js").unwrap();
         let arena = Bump::new();
 
-        let mut p = Parser::new(&arena, code.as_str());
+        let mut p = Parser::new(
+            &arena,
+            code.as_str(),
+            Extensions {
+                ts: true,
+                jsx: false,
+            },
+        );
+
         let ast = p.parse();
 
         for s in ast.iter() {
@@ -2613,7 +3144,14 @@ mod tests {
         let code = read_to_string("../../data/input.js").unwrap();
         let arena = Bump::new();
 
-        let mut p = Parser::new(&arena, code.as_str());
+        let mut p = Parser::new(
+            &arena,
+            code.as_str(),
+            Extensions {
+                ts: true,
+                jsx: false,
+            },
+        );
 
         let start = Instant::now();
 

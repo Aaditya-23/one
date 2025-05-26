@@ -1,7 +1,7 @@
 // pub mod nodes;
 pub mod parser;
-// mod plugins;
 pub mod tokenizer;
+mod typescript;
 mod lookup_table;
 pub mod kind;
 pub mod ast;

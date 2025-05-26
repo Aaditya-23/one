@@ -1,5 +1,4 @@
-    use Kind::*;
-
+use Kind::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub enum Kind {
@@ -163,15 +162,28 @@ pub enum Kind {
     DollarCurly,
     RegexpPattern,
     RegexpFlag,
+
+    // TypeScript
+    Interface,
+    Type,
+    Satisfies,
+    TypeString,
+    TypeNumber,
+    TypeBoolean,
+    Any,
+    Undefined,
+    Never,
+    Keyof,
+    Readonly
 }
 
-impl  Kind {
+impl Kind {
     pub fn as_str(&self) -> &str {
         match self {
             LineComment => "//",
             Star => "*",
             StarEqual => "*=",
-            _ => panic!("not implemented")
+            _ => panic!("not implemented"),
         }
     }
 }
