@@ -231,6 +231,7 @@ pub enum IdentifierOrMemberExpression<'a> {
 pub struct TsInterfaceHeritage<'a> {
     pub start: u32,
     pub expression: IdentifierOrMemberExpression<'a>,
+    pub type_parameter_arguments: Option<TsTypeParameterArguments<'a>>,
     pub end: u32
 }
 
@@ -241,5 +242,13 @@ pub struct TsInterfaceDeclaration<'a> {
     pub body: TsTypeObjectLiteral<'a>,
     pub type_parameters: Option<TsTypeParameterDeclaration<'a>>,
     pub extends: Vec<'a, TsInterfaceHeritage<'a>>,
+    pub end: u32,
+}
+
+#[derive(Debug, CloneIn)]
+pub struct TsInstantiationExpression<'a> {
+    pub start: u32,
+    pub expression: Expression<'a>,
+    pub type_parameter_arguments: TsTypeParameterArguments<'a>,
     pub end: u32,
 }

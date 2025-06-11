@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use bumpalo::{boxed::Box, collections::Vec, Bump};
 
 pub trait CloneIn<'a> {
@@ -39,6 +41,12 @@ where
         } else {
             None
         }
+    }
+}
+
+impl<'a, T: CloneIn<'a>> CloneIn<'a> for Range<T> {
+    fn clone_in(&self, arena: &'a Bump) -> Self {
+        self.start.clone_in(arena)..self.end.clone_in(arena)
     }
 }
 

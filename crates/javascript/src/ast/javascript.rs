@@ -1,5 +1,8 @@
+use std::ops::Range;
+
 use super::typescript::{
-    TsInterfaceDeclaration, TsTypeAliasDeclaration, TsTypeAnnotation, TsTypeParameterDeclaration,
+    TsInstantiationExpression, TsInterfaceDeclaration, TsInterfaceHeritage, TsTypeAliasDeclaration,
+    TsTypeAnnotation, TsTypeParameterDeclaration,
 };
 use crate::allocator::CloneIn;
 use bumpalo::{boxed::Box, collections::Vec, Bump};
@@ -471,7 +474,7 @@ pub struct SequenceExpression<'a> {
 #[derive(Debug, CloneIn)]
 pub struct Regexp<'a> {
     pub start: u32,
-    pub pattern: &'a str,
+    pub pattern: Range<u32>,
     pub flag: &'a str,
     pub end: u32,
     pub parenthesized: bool,
@@ -532,6 +535,9 @@ pub enum Expression<'a> {
     MetaProperty(Box<'a, MetaProperty<'a>>),
     SpreadElement(Box<'a, SpreadElement<'a>>),
     Elision(Box<'a, Elision>),
+    
+    // Typescript specific expressions
+    TsInstantiationExpression(Box<'a, TsInstantiationExpression<'a>>),
 }
 
 #[derive(Debug, CloneIn)]
@@ -626,6 +632,8 @@ pub struct Class<'a> {
     pub id: Option<Identifier<'a>>,
     pub super_class: Option<Expression<'a>>,
     pub body: Vec<'a, ClassBody<'a>>,
+    pub type_parameters: Option<TsTypeParameterDeclaration<'a>>,
+    pub implements: Vec<'a, TsInterfaceHeritage<'a>>,
     pub end: u32,
 }
 

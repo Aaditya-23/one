@@ -1,5 +1,3 @@
-use Kind::*;
-
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub enum Kind {
     // Comments
@@ -163,6 +161,9 @@ pub enum Kind {
     RegexpPattern,
     RegexpFlag,
 
+    // Error
+    Error,
+
     // TypeScript
     Interface,
     Type,
@@ -174,16 +175,6 @@ pub enum Kind {
     Undefined,
     Never,
     Keyof,
-    Readonly
-}
-
-impl Kind {
-    pub fn as_str(&self) -> &str {
-        match self {
-            LineComment => "//",
-            Star => "*",
-            StarEqual => "*=",
-            _ => panic!("not implemented"),
-        }
-    }
+    Readonly,
+    Implements,
 }

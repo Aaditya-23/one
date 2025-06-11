@@ -15,7 +15,7 @@ use crate::{
         },
     },
     kind::Kind,
-    parser::{is_identifier, Parser},
+    parser::{is_identifier, ParseResult, Parser},
 };
 
 impl<'a> Parser<'a> {
@@ -646,7 +646,7 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    pub fn parse_type_annotation(&mut self) -> TsTypeAnnotation<'a> {
+    pub fn parse_type_annotation(&mut self) -> ParseResult<TsTypeAnnotation<'a>> {
         let type_ = self.parse_type();
 
         if self.kind(Kind::Pipe) {
@@ -746,6 +746,10 @@ impl<'a> Parser<'a> {
                     },
                     self.arena,
                 ));
+
+                if self.kind(Kind::LessThan) {
+                    break;
+                }
             }
 
             let member_exp = match exp {
@@ -753,19 +757,33 @@ impl<'a> Parser<'a> {
                 _ => unsafe { core::hint::unreachable_unchecked() },
             };
 
+            let type_parameter_arguments = if self.kind(Kind::LessThan) {
+                Some(self.parse_type_parameter_arguments())
+            } else {
+                None
+            };
+
             TsInterfaceHeritage {
                 start: member_exp.start,
                 expression: IdentifierOrMemberExpression::MemberExpression(Box::new_in(
                     member_exp, self.arena,
                 )),
+                type_parameter_arguments,
                 end: self.prev_token_end,
             }
         } else {
+            let type_parameter_arguments = if self.kind(Kind::LessThan) {
+                Some(self.parse_type_parameter_arguments())
+            } else {
+                None
+            };
+
             TsInterfaceHeritage {
                 start: identifier.start,
                 expression: IdentifierOrMemberExpression::Identifier(Box::new_in(
                     identifier, self.arena,
                 )),
+                type_parameter_arguments,
                 end: self.prev_token_end,
             }
         }

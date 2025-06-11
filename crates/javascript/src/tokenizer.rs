@@ -1,6 +1,9 @@
+use std::ops::Range;
+
 use crate::{
     kind::Kind,
     lookup_table::{get_mapping, AsciiMapping::*},
+    DiagnosticError, ParserDiagnostics,
 };
 
 const UNICODE_SPACES: [char; 19] = [
@@ -18,8 +21,14 @@ pub struct Token {
     pub end: u32,
 }
 
+impl Token {
+    pub fn range(&self) -> Range<u32> {
+        self.start..self.end
+    }
+}
+
 #[derive(Debug)]
-pub enum LexContext {
+pub enum LexContext { 
     Normal,
     Template,
 }
@@ -29,9 +38,17 @@ pub struct Tokenizer<'a> {
     pub code: &'a str,
     pub index: usize,
     pub line_number: u32,
+    pub diagnostics: Vec<ParserDiagnostics<'a>>,
 }
 
 impl<'a> Tokenizer<'a> {
+    fn add_diagnostic(&mut self, message: &'a str, position: Range<usize>) {
+        self.diagnostics.push(ParserDiagnostics {
+            error: DiagnosticError::Other(message),
+            position,
+        })
+    }
+
     #[inline]
     unsafe fn get_byte(&self) -> u8 {
         let byte = self.code.as_bytes().get_unchecked(self.index);
@@ -60,13 +77,7 @@ impl<'a> Tokenizer<'a> {
 
     #[inline]
     fn byte_at(&mut self, offset: usize) -> Option<u8> {
-        let index = self.index + offset;
-
-        if index < self.code.len() {
-            Some(unsafe { *self.code.as_bytes().get_unchecked(index) })
-        } else {
-            None
-        }
+        self.code.as_bytes().get(self.index + offset).copied()
     }
 
     #[inline]
@@ -99,10 +110,35 @@ impl<'a> Tokenizer<'a> {
     }
 
     #[inline]
+    fn read_numeric_separator(&mut self, allow_ascii_hex_digits: bool) {
+        let is_forbidden = |b| {
+            if let Some(byte) = b {
+                if (b'0'..=b'9').contains(&byte)
+                    || (allow_ascii_hex_digits && char::from(byte).is_ascii_hexdigit())
+                {
+                    false
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
+        };
+
+        let prev = self.code.as_bytes().get(self.index - 1).copied();
+
+        if is_forbidden(prev) || is_forbidden(self.byte_at(1)) {
+            self.add_diagnostic("'_' cannot be used here", self.index..self.index + 1);
+        }
+
+        self.advance(1);
+    }
+
+    #[inline]
     fn read_hex_number(&mut self) {
         loop {
             match self.next_byte() {
-                Some(b'_') => {}
+                Some(b'_') => self.read_numeric_separator(true),
                 Some(b) if char::from(b).is_ascii_hexdigit() => {}
                 _ => return,
             }
@@ -113,8 +149,7 @@ impl<'a> Tokenizer<'a> {
     fn read_binary_number(&mut self) {
         loop {
             match self.next_byte() {
-                // handle _ later
-                Some(b'_') => {}
+                Some(b'_') => self.read_numeric_separator(false),
                 Some(b'0' | b'1') => {}
                 _ => return,
             }
@@ -125,7 +160,7 @@ impl<'a> Tokenizer<'a> {
     fn read_octal_number(&mut self) {
         loop {
             match self.next_byte() {
-                Some(b'_') => {}
+                Some(b'_') => self.read_numeric_separator(false),
                 Some(b'0'..=b'7') => {}
                 _ => return,
             }
@@ -181,8 +216,9 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    pub fn lex_regexp(&mut self) -> (u32, &'a str) {
-        let mut in_class = false;
+    pub fn lex_regexp(&mut self) -> Option<(u32, &'a str)> {
+        let start = self.index;
+        let (mut in_class, mut is_escaped) = (false, false);
         let (pattern_end, flag);
 
         loop {
@@ -198,26 +234,22 @@ impl<'a> Tokenizer<'a> {
                 }
 
                 Some(b'\\') => {
-                    let next = self.next_byte().expect("unterminated regexp");
-
-                    if next.is_ascii() {
-                        self.advance(1);
-                    } else {
-                        let ch = unsafe { self.get_utf8_char() };
-                        self.advance(ch.len_utf8());
-                    }
+                    is_escaped = !is_escaped;
+                    self.advance(1);
+                    continue;
                 }
 
                 Some(b'/') => {
-                    if !in_class {
-                        self.advance(1);
+                    self.advance(1);
+                    if !in_class && !is_escaped {
                         break;
-                    } else {
-                        self.advance(1);
                     }
                 }
 
-                Some(b'\n' | b'\r') => panic!("unterminated regexp"),
+                Some(b'\n' | b'\r') => {
+                    self.add_diagnostic("unterminated regular expression", start..self.index);
+                    return None;
+                }
 
                 Some(ch) => {
                     if ch.is_ascii() {
@@ -226,15 +258,24 @@ impl<'a> Tokenizer<'a> {
                         let ch = unsafe { self.get_utf8_char() };
 
                         if let '\u{2028}' | '\u{2029}' = ch {
-                            panic!("unterminated regexp");
+                            self.add_diagnostic(
+                                "unterminated regular expression",
+                                start..self.index,
+                            );
+                            return None;
                         }
 
                         self.advance(ch.len_utf8());
                     }
                 }
 
-                None => panic!("unterminated regexp"),
+                None => {
+                    self.add_diagnostic("unterminated regular expression", start..self.index);
+                    return None;
+                }
             }
+
+            is_escaped = false;
         }
 
         pattern_end = self.index as u32 - 1;
@@ -246,25 +287,26 @@ impl<'a> Tokenizer<'a> {
             flag = "";
         }
 
-        (pattern_end, flag)
+        Some((pattern_end, flag))
     }
 
     pub fn lex_template_literal(&mut self) -> Kind {
+        let start = self.index;
+        let mut is_escaped = false;
+
         loop {
             match self.byte_at(0) {
                 Some(b'`') => {
                     self.advance(1);
-                    return Kind::BackQuote;
+
+                    if !is_escaped {
+                        return Kind::BackQuote;
+                    }
                 }
                 Some(b'\\') => {
-                    let next = self.next_byte().expect("unterminated template literal");
-
-                    if next.is_ascii() {
-                        self.advance(1);
-                    } else {
-                        let ch = unsafe { self.get_utf8_char() };
-                        self.advance(ch.len_utf8());
-                    }
+                    self.advance(1);
+                    is_escaped = !is_escaped;
+                    continue;
                 }
                 Some(b'$') => {
                     if self.byte_at(1) == Some(b'{') {
@@ -304,12 +346,19 @@ impl<'a> Tokenizer<'a> {
                         self.advance(ch.len_utf8());
                     }
                 }
-                None => panic!("unterminated template literal"),
+                None => {
+                    self.add_diagnostic("unterminated template literal", start..self.index);
+                    return Kind::Error;
+                }
             }
+
+            is_escaped = false;
         }
     }
 
     fn read_slash(&mut self) -> Kind {
+        let start = self.index;
+
         match self.next_byte() {
             Some(b'/') => {
                 self.advance(1);
@@ -351,7 +400,8 @@ impl<'a> Tokenizer<'a> {
                     }
                 }
 
-                panic!("unterminated block comment")
+                self.add_diagnostic("unterminated block comment", start..self.index);
+                Kind::BlockComment
             }
 
             Some(b'=') => {
@@ -425,8 +475,8 @@ impl<'a> Tokenizer<'a> {
     fn read_floating_number(&mut self) -> Kind {
         loop {
             match self.next_byte() {
-                Some(b'_') => {}
-                Some(b'0'..=b'9') => {}
+                Some(b'_') => self.read_numeric_separator(false),
+                Some(b'0'..=b'9') => { /*  continue reading digits */ }
                 Some(b'e' | b'E') => {
                     self.advance(1);
                     self.read_exponent_part();
@@ -439,65 +489,83 @@ impl<'a> Tokenizer<'a> {
         Kind::Number
     }
 
+    // todo: start with making byte_at to next_byte in this fn
     fn read_zero(&mut self) -> Kind {
-        match self.byte_at(1) {
-            Some(b'.') => {
-                self.advance(1);
-                return self.read_floating_number();
+        let start = self.index;
+
+        if let Some(byte) = self.next_byte() {
+            match byte {
+                b'.' => return self.read_floating_number(),
+
+                b'n' => self.advance(2),
+
+                b'x' | b'X' => match self.byte_at(1) {
+                    Some(byte) if char::from(byte).is_ascii_hexdigit() => {
+                        self.advance(1);
+                        self.read_hex_number();
+
+                        if let Some(b'n') = self.byte_at(0) {
+                            self.advance(1);
+                        }
+                    }
+                    _ => self.add_diagnostic("expected hex number", start..self.index + 1),
+                },
+
+                b'b' | b'B' => match self.byte_at(1) {
+                    Some(b'0' | b'1') => {
+                        self.advance(1);
+                        self.read_binary_number();
+
+                        if let Some(b'n') = self.byte_at(0) {
+                            self.advance(1);
+                        }
+                    }
+                    _ => self.add_diagnostic("expected binary number", start..self.index + 1),
+                },
+
+                b'o' | b'O' => match self.byte_at(1) {
+                    Some(b'0'..=b'7') => {
+                        self.advance(1);
+                        self.read_octal_number();
+
+                        if let Some(b'n') = self.byte_at(0) {
+                            self.advance(1);
+                        }
+                    }
+                    _ => self.add_diagnostic("expected octal number", start..self.index + 1),
+                },
+
+                _ => {
+                    if byte == b'0' {
+                        self.add_diagnostic("multiple zeros not allowed", start..self.index + 1);
+                    }
+                    return self.read_number(true);
+                }
             }
-            Some(b'0') => panic!("multiple zeros not allowed"),
-            Some(b'n') => self.advance(2),
-            Some(b'x' | b'X') => match self.byte_at(2) {
-                Some(byte) if char::from(byte).is_ascii_hexdigit() => {
-                    self.advance(2);
-                    self.read_hex_number();
-
-                    if let Some(b'n') = self.byte_at(0) {
-                        self.advance(1);
-                    }
-                }
-                _ => panic!("expected hex number"),
-            },
-            Some(b'b' | b'B') => match self.byte_at(2) {
-                Some(b'0' | b'1') => {
-                    self.advance(2);
-                    self.read_binary_number();
-
-                    if let Some(b'n') = self.byte_at(0) {
-                        self.advance(1);
-                    }
-                }
-                _ => panic!("expected binary number"),
-            },
-            Some(b'o' | b'O') => match self.byte_at(2) {
-                Some(b'0'..=b'7') => {
-                    self.advance(2);
-                    self.read_octal_number();
-
-                    if let Some(b'n') = self.byte_at(0) {
-                        self.advance(1);
-                    }
-                }
-                _ => panic!("expected octal number"),
-            },
-            _ => return self.read_number(true),
         }
 
         Kind::Number
     }
 
     fn read_number(&mut self, has_leading_zero: bool) -> Kind {
+        let start = self.index;
+
         loop {
             match self.next_byte() {
-                Some(b'.') => {
-                    return self.read_floating_number();
-                }
+                Some(b'.') => return self.read_floating_number(),
                 Some(b'_') => {
                     if has_leading_zero {
-                        panic!("no leading zero");
+                        self.add_diagnostic(
+                            "'_' cannot be used after a leading zero",
+                            start..self.index + 1,
+                        );
                     }
+
+                    self.read_numeric_separator(false)
                 }
-                Some(b'0'..=b'9') => {}
+                Some(b'0'..=b'9') => {
+                    // * continue reading digits
+                }
                 Some(b'e' | b'E') => {
                     self.advance(1);
                     self.read_exponent_part();
@@ -505,7 +573,7 @@ impl<'a> Tokenizer<'a> {
                 }
                 Some(b'n') => {
                     if has_leading_zero {
-                        panic!("no leading zero");
+                        self.add_diagnostic("no leading zeros", start..self.index + 1);
                     }
 
                     self.advance(1);
@@ -727,6 +795,7 @@ impl<'a> Tokenizer<'a> {
             b"instanceof" => Kind::Instanceof,
             b"import" => Kind::Import,
             b"interface" => Kind::Interface,
+            b"implements" => Kind::Implements,
 
             b"let" => Kind::Let,
 
@@ -740,7 +809,7 @@ impl<'a> Tokenizer<'a> {
             b"switch" => Kind::Switch,
             b"static" => Kind::Static,
             b"set" => Kind::Set,
-            b"satisfies" => Kind::Satisfies, 
+            b"satisfies" => Kind::Satisfies,
             b"string" => Kind::TypeString,
 
             b"this" => Kind::This,
@@ -748,7 +817,7 @@ impl<'a> Tokenizer<'a> {
             b"throw" => Kind::Throw,
             b"try" => Kind::Try,
             b"true" => Kind::Boolean,
-            b"type" => Kind::Type, 
+            b"type" => Kind::Type,
 
             b"var" => Kind::Var,
             b"void" => Kind::Void,
@@ -761,21 +830,37 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn resolve_string_literal(&mut self) -> Kind {
+        let start = self.index;
         let quote = unsafe { self.get_byte() };
         self.advance(1);
+
+        let mut is_escaped = false;
 
         loop {
             match self.byte_at(0) {
                 Some(b'\\') => {
-                    self.advance(2);
+                    self.advance(1);
+                    is_escaped = !is_escaped;
+                    continue;
                 }
                 Some(ch) if ch == quote => {
                     self.advance(1);
-                    return Kind::String;
+
+                    if !is_escaped {
+                        return Kind::String;
+                    }
                 }
                 Some(ch) => {
                     if ch.is_ascii() {
                         match ch {
+                            b'\n' | b'\r' if !is_escaped => {
+                                self.add_diagnostic(
+                                    "unterminated string literal",
+                                    start..self.index,
+                                );
+
+                                return Kind::Error;
+                            }
                             b'\n' => {
                                 self.line_number += 1;
                             }
@@ -805,9 +890,12 @@ impl<'a> Tokenizer<'a> {
                 }
                 None => break,
             }
+
+            is_escaped = false;
         }
 
-        panic!("unterminated string")
+        self.add_diagnostic("unterminated string literal", start..self.index);
+        Kind::Error
     }
 
     fn get_token(&mut self) -> Kind {
@@ -850,7 +938,7 @@ impl<'a> Tokenizer<'a> {
             At => todo!(),
             Unicode => todo!(),
 
-            _ => panic!("unexpected token"),
+            _ => Kind::Error,
         }
     }
 
@@ -900,6 +988,7 @@ impl<'a> Tokenizer<'a> {
             code,
             index: 0,
             line_number: 1,
+            diagnostics: Vec::new(),
         }
     }
 }
