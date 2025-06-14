@@ -2,23 +2,30 @@ use bumpalo::{boxed::Box, collections::Vec, Bump};
 
 use crate::{
     ast::{
-        javascript::{Expression, FunctionParams, Identifier, Location, MemberExpression},
+        javascript::{
+            Expression, FunctionParams, Identifier, Location, MemberExpression, Statement,
+        },
         typescript::{
-            IdentifierOrMemberExpression, IdentifierOrQualifiedName, TsIndexedAccess,
-            TsInterfaceDeclaration, TsInterfaceHeritage, TsMethodSignature, TsPropertyMember,
-            TsPropertySignature, TsTypeAliasDeclaration, TsTypeAnnotation, TsTypeAny, TsTypeArray,
-            TsTypeBoolean, TsTypeIdentifier, TsTypeIntersection, TsTypeLiteral, TsTypeNull,
-            TsTypeNumber, TsTypeObjectLiteral, TsTypeOperator, TsTypeOperatorKind, TsTypeParameter,
+            IdentifierOrMemberExpression, IdentifierOrQualifiedName, TsAsExpression,
+            TsIndexedAccess, TsInterfaceDeclaration, TsInterfaceHeritage, TsMethodSignature,
+            TsNonNullExpression, TsPropertyMember, TsPropertySignature, TsSatisfiesExpression,
+            TsTypeAliasDeclaration, TsTypeAnnotation, TsTypeAny, TsTypeArray, TsTypeBoolean,
+            TsTypeIdentifier, TsTypeIntersection, TsTypeLiteral, TsTypeNull, TsTypeNumber,
+            TsTypeObjectLiteral, TsTypeOperator, TsTypeOperatorKind, TsTypeParameter,
             TsTypeParameterArguments, TsTypeParameterDeclaration, TsTypeParenthesized,
             TsTypeQualifiedName, TsTypeReference, TsTypeString, TsTypeTuple, TsTypeUndefined,
             TsTypeUnion,
         },
     },
     kind::Kind,
-    parser::{is_identifier, ParseResult, Parser},
+    parser::{ParseResult, Parser},
 };
 
 impl<'a> Parser<'a> {
+    // pub fn can_follow_type_arguments_in_exp(&self) -> bool {
+
+    // }
+
     pub fn parse_type_identifier(&mut self) -> TsTypeIdentifier {
         let start = self.token.start;
 
@@ -136,7 +143,7 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    pub fn parse_ts_property_member(&mut self) -> TsPropertyMember<'a> {
+    pub fn parse_ts_property_member(&mut self) -> ParseResult<TsPropertyMember<'a>> {
         let start = self.token.start;
 
         let (mut readonly_token, mut is_computed, mut is_optional) = (None, false, false);
@@ -152,9 +159,9 @@ impl<'a> Parser<'a> {
             is_computed = true;
             self.bump();
 
-            key = self.parse_expression();
+            key = self.parse_expression()?;
 
-            self.expect(Kind::BracketC);
+            self.bump_token(Kind::BracketC)?;
         } else if self.is_curr_token_identifier() {
             key = Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
         } else if let Some(token) = readonly_token {
@@ -170,7 +177,8 @@ impl<'a> Parser<'a> {
 
             readonly_token = None;
         } else {
-            panic!("invalid token");
+            self.add_diagnostic("invalid token", self.token.range());
+            return Err(());
         }
 
         if self.kind(Kind::Question) {
@@ -180,23 +188,23 @@ impl<'a> Parser<'a> {
 
         if self.kind(Kind::LessThan) || self.kind(Kind::ParenO) {
             let type_parameters = if self.kind(Kind::LessThan) {
-                Some(self.parse_type_parameter_declaration())
+                Some(self.parse_type_parameter_declaration()?)
             } else {
                 None
             };
 
             self.ctx.in_method_type_declaration = true;
-            let params = self.parse_function_parameters();
+            let params = self.parse_function_parameters()?;
             self.ctx.in_method_type_declaration = false;
 
             let type_annotation = if self.kind(Kind::Colon) {
                 self.bump();
-                Some(self.parse_type_annotation())
+                Some(self.parse_type_annotation()?)
             } else {
                 None
             };
 
-            TsPropertyMember::MethodSignature(Box::new_in(
+            Ok(TsPropertyMember::MethodSignature(Box::new_in(
                 TsMethodSignature {
                     start,
                     computed: is_computed,
@@ -208,16 +216,16 @@ impl<'a> Parser<'a> {
                     end: self.prev_token_end,
                 },
                 self.arena,
-            ))
+            )))
         } else {
             let type_annotation = if self.kind(Kind::Colon) {
                 self.bump();
-                Some(self.parse_type_annotation())
+                Some(self.parse_type_annotation()?)
             } else {
                 None
             };
 
-            TsPropertyMember::PropertySignature(Box::new_in(
+            Ok(TsPropertyMember::PropertySignature(Box::new_in(
                 TsPropertySignature {
                     start,
                     key,
@@ -228,11 +236,11 @@ impl<'a> Parser<'a> {
                     end: self.prev_token_end,
                 },
                 self.arena,
-            ))
+            )))
         }
     }
 
-    pub fn parse_object_literal(&mut self) -> TsTypeAnnotation<'a> {
+    pub fn parse_object_literal(&mut self) -> ParseResult<TsTypeAnnotation<'a>> {
         let start = self.token.start;
 
         // skip {
@@ -241,31 +249,29 @@ impl<'a> Parser<'a> {
         let mut members = Vec::new_in(self.arena);
 
         while !matches!(self.token.kind, Kind::BracesC | Kind::EOF) {
-            let member = self.parse_ts_property_member();
+            let member = self.parse_ts_property_member()?;
             members.push(member);
 
             if matches!(self.token.kind, Kind::Comma | Kind::Semicolon) {
                 self.bump();
             } else if !self.kind(Kind::BracesC) {
-                if !self.token.is_on_new_line {
-                    panic!("invalid token")
-                }
+                self.assert(!self.token.is_on_new_line, "invalid token")?;
             }
         }
 
-        self.expect(Kind::BracesC);
+        self.bump_token(Kind::BracesC)?;
 
-        TsTypeAnnotation::ObjectLiteral(Box::new_in(
+        Ok(TsTypeAnnotation::ObjectLiteral(Box::new_in(
             TsTypeObjectLiteral {
                 start,
                 members,
                 end: self.prev_token_end,
             },
             self.arena,
-        ))
+        )))
     }
 
-    pub fn parse_type_tuple(&mut self) -> TsTypeAnnotation<'a> {
+    pub fn parse_type_tuple(&mut self) -> ParseResult<TsTypeAnnotation<'a>> {
         let start = self.token.start;
         let mut elements = Vec::new_in(self.arena);
 
@@ -273,26 +279,29 @@ impl<'a> Parser<'a> {
         self.bump();
 
         while !matches!(self.token.kind, Kind::BracketC | Kind::EOF) {
-            elements.push(self.parse_type_annotation());
+            elements.push(self.parse_type_annotation()?);
 
             if self.kind(Kind::Comma) {
                 self.bump();
             }
         }
 
-        self.expect(Kind::BracketC);
+        self.bump_token(Kind::BracketC)?;
 
-        TsTypeAnnotation::Tuple(Box::new_in(
+        Ok(TsTypeAnnotation::Tuple(Box::new_in(
             TsTypeTuple {
                 start,
                 elements,
                 end: self.prev_token_end,
             },
             self.arena,
-        ))
+        )))
     }
 
-    pub fn parse_type_qualified_name(&mut self, left: TsTypeIdentifier) -> TsTypeAnnotation<'a> {
+    pub fn parse_type_qualified_name(
+        &mut self,
+        left: TsTypeIdentifier,
+    ) -> ParseResult<TsTypeAnnotation<'a>> {
         let start = left.start;
 
         // skip .
@@ -304,7 +313,7 @@ impl<'a> Parser<'a> {
         ));
 
         let type_parameter_arguments = if self.kind(Kind::LessThan) {
-            Some(self.parse_type_parameter_arguments())
+            Some(self.parse_type_parameter_arguments()?)
         } else {
             None
         };
@@ -321,7 +330,8 @@ impl<'a> Parser<'a> {
             self.bump();
 
             if !self.is_curr_token_identifier() {
-                panic!("expected identifier, found {:?}", self.token.kind);
+                self.report_unexpected_token(Kind::Identifier);
+                return Err(());
             }
 
             let right = IdentifierOrQualifiedName::Identifier(Box::new_in(
@@ -330,7 +340,7 @@ impl<'a> Parser<'a> {
             ));
 
             let type_parameter_arguments = if self.kind(Kind::LessThan) {
-                Some(self.parse_type_parameter_arguments())
+                Some(self.parse_type_parameter_arguments()?)
             } else {
                 None
             };
@@ -344,22 +354,24 @@ impl<'a> Parser<'a> {
             }
         }
 
-        TsTypeAnnotation::QualifiedName(Box::new_in(annotation, self.arena))
+        Ok(TsTypeAnnotation::QualifiedName(Box::new_in(
+            annotation, self.arena,
+        )))
     }
 
-    pub fn parse_maybe_type_reference(&mut self) -> TsTypeAnnotation<'a> {
+    pub fn parse_maybe_type_reference(&mut self) -> ParseResult<TsTypeAnnotation<'a>> {
         let start = self.token.start;
 
         let name = self.parse_type_identifier();
         let mut type_parameter_arguments = None;
 
         if self.kind(Kind::LessThan) {
-            type_parameter_arguments = Some(self.parse_type_parameter_arguments());
+            type_parameter_arguments = Some(self.parse_type_parameter_arguments()?);
         } else if self.kind(Kind::Dot) {
             return self.parse_type_qualified_name(name);
         }
 
-        TsTypeAnnotation::Reference(Box::new_in(
+        Ok(TsTypeAnnotation::Reference(Box::new_in(
             TsTypeReference {
                 start,
                 name,
@@ -367,10 +379,10 @@ impl<'a> Parser<'a> {
                 end: self.prev_token_end,
             },
             self.arena,
-        ))
+        )))
     }
 
-    pub fn parse_type_operator(&mut self) -> TsTypeAnnotation<'a> {
+    pub fn parse_type_operator(&mut self) -> ParseResult<TsTypeAnnotation<'a>> {
         let start = self.token.start;
 
         let operator = match self.token.kind {
@@ -379,9 +391,9 @@ impl<'a> Parser<'a> {
             _ => unsafe { core::hint::unreachable_unchecked() },
         };
 
-        let type_annotation = self.parse_type_annotation();
+        let type_annotation = self.parse_type_annotation()?;
 
-        TsTypeAnnotation::TypeOperator(Box::new_in(
+        Ok(TsTypeAnnotation::TypeOperator(Box::new_in(
             TsTypeOperator {
                 start,
                 operator,
@@ -389,10 +401,12 @@ impl<'a> Parser<'a> {
                 end: self.prev_token_end,
             },
             self.arena,
-        ))
+        )))
     }
 
-    pub fn parse_type_parameter_declaration(&mut self) -> TsTypeParameterDeclaration<'a> {
+    pub fn parse_type_parameter_declaration(
+        &mut self,
+    ) -> ParseResult<TsTypeParameterDeclaration<'a>> {
         let start = self.token.start;
 
         // skip <
@@ -403,22 +417,23 @@ impl<'a> Parser<'a> {
         while !matches!(self.token.kind, Kind::EOF | Kind::GreaterThan) {
             let start = self.token.start;
 
-            let name = if self.is_curr_token_identifier() {
-                self.parse_type_identifier()
-            } else {
-                panic!("invalid token")
-            };
+            if !self.is_curr_token_identifier() {
+                self.report_unexpected_token(Kind::Identifier);
+                return Err(());
+            }
+
+            let name = self.parse_type_identifier();
 
             let constraint = if self.kind(Kind::Extends) {
                 self.bump();
-                Some(self.parse_type_annotation())
+                Some(self.parse_type_annotation()?)
             } else {
                 None
             };
 
             let default = if self.kind(Kind::Equal) {
                 self.bump();
-                Some(self.parse_type_annotation())
+                Some(self.parse_type_annotation()?)
             } else {
                 None
             };
@@ -436,16 +451,16 @@ impl<'a> Parser<'a> {
             }
         }
 
-        self.expect(Kind::GreaterThan);
+        self.bump_token(Kind::GreaterThan)?;
 
-        TsTypeParameterDeclaration {
+        Ok(TsTypeParameterDeclaration {
             start,
             params,
             end: self.prev_token_end,
-        }
+        })
     }
 
-    pub fn parse_type_parameter_arguments(&mut self) -> TsTypeParameterArguments<'a> {
+    pub fn parse_type_parameter_arguments(&mut self) -> ParseResult<TsTypeParameterArguments<'a>> {
         let start = self.token.start;
 
         // skip <
@@ -454,34 +469,26 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new_in(self.arena);
 
         while !matches!(self.token.kind, Kind::EOF | Kind::GreaterThan) {
-            let start = self.token.start;
-
-            let name = if self.is_curr_token_identifier() {
-                self.parse_type_identifier()
-            } else {
-                panic!("invalid token")
-            };
-
-            params.push(self.parse_type_annotation());
+            params.push(self.parse_type_annotation()?);
 
             if self.kind(Kind::Comma) {
                 self.bump();
             }
         }
 
-        self.expect(Kind::GreaterThan);
+        self.bump_token(Kind::GreaterThan)?;
 
-        TsTypeParameterArguments {
+        Ok(TsTypeParameterArguments {
             start,
             params,
             end: self.prev_token_end,
-        }
+        })
     }
 
     pub fn parse_type_array_or_indexed_access(
         &mut self,
         initial_annotation: TsTypeAnnotation<'a>,
-    ) -> TsTypeAnnotation<'a> {
+    ) -> ParseResult<TsTypeAnnotation<'a>> {
         let start = initial_annotation.start();
 
         // skip [
@@ -490,107 +497,73 @@ impl<'a> Parser<'a> {
         if self.kind(Kind::BracketC) {
             self.bump();
 
-            TsTypeAnnotation::Array(Box::new_in(
+            Ok(TsTypeAnnotation::Array(Box::new_in(
                 TsTypeArray {
                     start,
                     element: initial_annotation,
                     end: self.prev_token_end,
                 },
                 self.arena,
-            ))
+            )))
         } else {
             let indexed_access = TsTypeAnnotation::IndexedAccess(Box::new_in(
                 TsIndexedAccess {
                     start,
                     object: initial_annotation,
-                    index: self.parse_type_annotation(),
+                    index: self.parse_type_annotation()?,
                     end: self.prev_token_end,
                 },
                 self.arena,
             ));
 
-            self.expect(Kind::BracketC);
+            self.bump_token(Kind::BracketC)?;
 
-            indexed_access
+            Ok(indexed_access)
         }
     }
 
-    pub fn parse_type_parenthesized(&mut self) -> TsTypeAnnotation<'a> {
+    pub fn parse_type_parenthesized(&mut self) -> ParseResult<TsTypeAnnotation<'a>> {
         let start = self.token.start;
 
         // skip (
         self.bump();
 
-        let type_annotation = self.parse_type_annotation();
+        let type_annotation = self.parse_type_annotation()?;
 
-        self.expect(Kind::ParenC);
+        self.bump_token(Kind::ParenC)?;
 
-        TsTypeAnnotation::Parenthesized(Box::new_in(
+        Ok(TsTypeAnnotation::Parenthesized(Box::new_in(
             TsTypeParenthesized {
                 start,
                 type_annotation,
                 end: self.prev_token_end,
             },
             self.arena,
-        ))
-    }
-
-    pub fn parse_type(&mut self) -> TsTypeAnnotation<'a> {
-        let mut annotation = match self.token.kind {
-            Kind::TypeString => self.parse_type_string(),
-            Kind::TypeNumber => self.parse_type_number(),
-            Kind::TypeBoolean => self.parse_type_boolean(),
-            Kind::Any => self.parse_type_any(),
-            Kind::Undefined => self.parse_type_undefined(),
-            Kind::Null => self.parse_type_null(),
-            Kind::String | Kind::Number | Kind::Boolean => self.parse_type_literal(),
-            Kind::BracesO => self.parse_object_literal(),
-            Kind::BracketO => self.parse_type_tuple(),
-            Kind::Keyof | Kind::Typeof => self.parse_type_operator(),
-            Kind::ParenO => self.parse_type_parenthesized(),
-            _ => {
-                if self.is_curr_token_identifier() {
-                    self.parse_maybe_type_reference()
-                } else {
-                    panic!("invalid token");
-                }
-            }
-        };
-
-        while !self.kind(Kind::EOF) {
-            if self.kind(Kind::BracketO) {
-                annotation = self.parse_type_array_or_indexed_access(annotation);
-            } else if self.kind(Kind::Pipe) {
-            } else if self.kind(Kind::Ampersand) {
-            } else {
-                break;
-            }
-        }
-
-        annotation
+        )))
     }
 
     pub fn parse_type_union(
         &mut self,
         initial_annotation: TsTypeAnnotation<'a>,
-    ) -> TsTypeAnnotation<'a> {
+    ) -> ParseResult<TsTypeAnnotation<'a>> {
         let start = initial_annotation.start();
 
         // skip |
         self.bump();
 
-        let mut types = bumpalo::vec![in self.arena; initial_annotation];
+        let mut types = Vec::new_in(self.arena);
+        types.push(initial_annotation);
 
-        let mut next_type = self.parse_type();
+        let mut next_type = self.parse_type()?;
 
         loop {
             if self.kind(Kind::Pipe) {
                 self.bump();
                 types.push(next_type);
 
-                next_type = self.parse_type();
+                next_type = self.parse_type()?;
             } else if self.kind(Kind::Ampersand) {
-                next_type = self.parse_type_intersection(next_type);
+                next_type = self.parse_type_intersection(next_type)?;
             } else {
                 break;
             }
@@ -598,37 +571,38 @@ impl<'a> Parser<'a> {
 
         types.push(next_type);
 
-        TsTypeAnnotation::Union(Box::new_in(
+        Ok(TsTypeAnnotation::Union(Box::new_in(
             TsTypeUnion {
                 start,
                 types,
                 end: self.prev_token_end,
             },
             self.arena,
-        ))
+        )))
     }
 
     pub fn parse_type_intersection(
         &mut self,
         initial_annotation: TsTypeAnnotation<'a>,
-    ) -> TsTypeAnnotation<'a> {
+    ) -> ParseResult<TsTypeAnnotation<'a>> {
         let start = initial_annotation.start();
 
         // skip &
         self.bump();
 
-        let mut types = bumpalo::vec![in self.arena; initial_annotation];
+        let mut types = Vec::new_in(self.arena);
+        types.push(initial_annotation);
 
-        let mut next_type = self.parse_type();
+        let mut next_type = self.parse_type()?;
 
         loop {
             if self.kind(Kind::Ampersand) {
                 self.bump();
 
                 types.push(next_type);
-                next_type = self.parse_type();
+                next_type = self.parse_type()?;
             } else if self.kind(Kind::Pipe) {
-                next_type = self.parse_type_union(next_type);
+                next_type = self.parse_type_union(next_type)?;
             } else {
                 break;
             }
@@ -636,62 +610,55 @@ impl<'a> Parser<'a> {
 
         types.push(next_type);
 
-        TsTypeAnnotation::Intersection(Box::new_in(
+        Ok(TsTypeAnnotation::Intersection(Box::new_in(
             TsTypeIntersection {
                 start,
                 types,
                 end: self.prev_token_end,
             },
             self.arena,
-        ))
+        )))
     }
 
-    pub fn parse_type_annotation(&mut self) -> ParseResult<TsTypeAnnotation<'a>> {
-        let type_ = self.parse_type();
-
-        if self.kind(Kind::Pipe) {
-            self.parse_type_union(type_)
-        } else if self.kind(Kind::Ampersand) {
-            self.parse_type_intersection(type_)
-        } else {
-            type_
-        }
-    }
-
-    pub fn parse_ts_type_alias_declaration(&mut self) -> TsTypeAliasDeclaration<'a> {
+    pub fn parse_ts_type_alias_declaration(&mut self) -> ParseResult<Statement<'a>> {
         let start = self.token.start;
 
         // skip type
         self.bump();
 
-        if !is_identifier(self.token.kind) {
-            panic!("expected identifier, found {:?}", self.token.kind);
+        if !self.is_curr_token_identifier() {
+            self.report_unexpected_token(Kind::Identifier);
+            return Err(());
         }
 
         let id = self.parse_type_identifier();
 
         let type_parameters = if self.kind(Kind::LessThan) {
-            Some(self.parse_type_parameter_declaration())
+            Some(self.parse_type_parameter_declaration()?)
         } else {
             None
         };
 
-        self.expect(Kind::Equal);
+        self.bump_token(Kind::Equal)?;
 
-        let type_annotation = self.parse_type_annotation();
+        let type_annotation = self.parse_type_annotation()?;
 
-        TsTypeAliasDeclaration {
-            start,
-            id,
-            type_parameters,
-            type_annotation,
-            end: self.prev_token_end,
-        }
+        Ok(Statement::TsTypeAliasDeclaration(Box::new_in(
+            TsTypeAliasDeclaration {
+                start,
+                id,
+                type_parameters,
+                type_annotation,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        )))
     }
 
-    pub fn parse_ts_interface_heritage(&mut self) -> TsInterfaceHeritage<'a> {
+    pub fn parse_ts_interface_heritage(&mut self) -> ParseResult<TsInterfaceHeritage<'a>> {
         if !self.is_curr_token_identifier() {
-            panic!("expected identifier, found {:?}", self.token.kind);
+            self.report_unexpected_token(Kind::Identifier);
+            return Err(());
         }
 
         let identifier = self.parse_identifier();
@@ -716,19 +683,28 @@ impl<'a> Parser<'a> {
                     is_computed = false;
 
                     self.bump();
-                    assert!(self.is_curr_token_identifier(), "expected identifier");
+
+                    if !self.is_curr_token_identifier() {
+                        self.report_unexpected_token(Kind::Identifier);
+                        return Err(());
+                    }
+
                     property =
                         Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
                 } else if self.kind(Kind::BracketO) {
                     is_computed = true;
 
                     self.bump();
-                    property = self.parse_expression();
-                    self.expect(Kind::BracketC);
+                    property = self.parse_expression()?;
+                    self.bump_token(Kind::BracketC)?;
                 } else if is_optional {
                     is_computed = false;
 
-                    assert!(self.is_curr_token_identifier(), "expected identifier");
+                    if !self.is_curr_token_identifier() {
+                        self.report_unexpected_token(Kind::Identifier);
+                        return Err(());
+                    }
+
                     property =
                         Expression::Identifier(Box::new_in(self.parse_identifier(), self.arena));
                 } else {
@@ -758,50 +734,51 @@ impl<'a> Parser<'a> {
             };
 
             let type_parameter_arguments = if self.kind(Kind::LessThan) {
-                Some(self.parse_type_parameter_arguments())
+                Some(self.parse_type_parameter_arguments()?)
             } else {
                 None
             };
 
-            TsInterfaceHeritage {
+            Ok(TsInterfaceHeritage {
                 start: member_exp.start,
                 expression: IdentifierOrMemberExpression::MemberExpression(Box::new_in(
                     member_exp, self.arena,
                 )),
                 type_parameter_arguments,
                 end: self.prev_token_end,
-            }
+            })
         } else {
             let type_parameter_arguments = if self.kind(Kind::LessThan) {
-                Some(self.parse_type_parameter_arguments())
+                Some(self.parse_type_parameter_arguments()?)
             } else {
                 None
             };
 
-            TsInterfaceHeritage {
+            Ok(TsInterfaceHeritage {
                 start: identifier.start,
                 expression: IdentifierOrMemberExpression::Identifier(Box::new_in(
                     identifier, self.arena,
                 )),
                 type_parameter_arguments,
                 end: self.prev_token_end,
-            }
+            })
         }
     }
 
-    pub fn parse_ts_interface_declaration(&mut self) -> TsInterfaceDeclaration<'a> {
+    pub fn parse_ts_interface_declaration(&mut self) -> ParseResult<Statement<'a>> {
         let start = self.token.start;
 
         // skip interface
         self.bump();
 
-        if !is_identifier(self.token.kind) {
-            panic!("expected identifier, found {:?}", self.token.kind);
+        if !self.is_curr_token_identifier() {
+            self.report_unexpected_token(Kind::Identifier);
+            return Err(());
         }
 
         let id = self.parse_type_identifier();
         let type_parameters = if self.kind(Kind::LessThan) {
-            Some(self.parse_type_parameter_declaration())
+            Some(self.parse_type_parameter_declaration()?)
         } else {
             None
         };
@@ -812,26 +789,120 @@ impl<'a> Parser<'a> {
             self.bump();
 
             while !matches!(self.token.kind, Kind::EOF | Kind::BracesO) {
-                extensions.push(self.parse_ts_interface_heritage());
+                extensions.push(self.parse_ts_interface_heritage()?);
 
                 if !self.kind(Kind::BracesC) {
-                    self.expect(Kind::Comma);
+                    self.bump_token(Kind::Comma)?;
                 }
             }
         }
 
-        let body = match self.parse_object_literal() {
+        let body = match self.parse_object_literal()? {
             TsTypeAnnotation::ObjectLiteral(obj) => Box::into_inner(obj),
             _ => unsafe { core::hint::unreachable_unchecked() },
         };
 
-        TsInterfaceDeclaration {
-            start,
-            id,
-            body,
-            type_parameters,
-            extends: extensions,
-            end: self.prev_token_end,
+        Ok(Statement::TsInterfaceDeclaration(Box::new_in(
+            TsInterfaceDeclaration {
+                start,
+                id,
+                body,
+                type_parameters,
+                extends: extensions,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        )))
+    }
+
+    pub fn parse_ts_as_expression(&mut self, exp: Expression<'a>) -> ParseResult<Expression<'a>> {
+        // skip as
+        self.bump();
+
+        Ok(Expression::TsAsExpression(Box::new_in(
+            TsAsExpression {
+                start: exp.start(),
+                expression: exp,
+                type_annotation: self.parse_type_annotation()?,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        )))
+    }
+
+    pub fn parse_ts_satisfies_expression(
+        &mut self,
+        exp: Expression<'a>,
+    ) -> ParseResult<Expression<'a>> {
+        // skip satisfies
+        self.bump();
+
+        Ok(Expression::TsSatisfiesExpression(Box::new_in(
+            TsSatisfiesExpression {
+                start: exp.start(),
+                expression: exp,
+                type_annotation: self.parse_type_annotation()?,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        )))
+    }
+
+    pub fn parse_ts_non_null_expression(&mut self, exp: Expression<'a>) -> Expression<'a> {
+        // skip !
+        self.bump();
+
+        Expression::TsNonNullExpression(Box::new_in(
+            TsNonNullExpression {
+                start: exp.start(),
+                expression: exp,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        ))
+    }
+
+    pub fn parse_type(&mut self) -> ParseResult<TsTypeAnnotation<'a>> {
+        let mut annotation = match self.token.kind {
+            Kind::TypeString => self.parse_type_string(),
+            Kind::TypeNumber => self.parse_type_number(),
+            Kind::TypeBoolean => self.parse_type_boolean(),
+            Kind::Any => self.parse_type_any(),
+            Kind::Undefined => self.parse_type_undefined(),
+            Kind::Null => self.parse_type_null(),
+            Kind::String | Kind::Number | Kind::Boolean => self.parse_type_literal(),
+            Kind::BracesO => self.parse_object_literal()?,
+            Kind::BracketO => self.parse_type_tuple()?,
+            Kind::Keyof | Kind::Typeof => self.parse_type_operator()?,
+            Kind::ParenO => self.parse_type_parenthesized()?,
+            _ => {
+                if self.is_curr_token_identifier() {
+                    self.parse_maybe_type_reference()?
+                } else {
+                    self.add_diagnostic("invalid token", self.token.range());
+                    return Err(());
+                }
+            }
+        };
+
+        while self.kind(Kind::BracketO) {
+            annotation = self.parse_type_array_or_indexed_access(annotation)?;
         }
+
+        Ok(annotation)
+    }
+
+    pub fn parse_type_annotation(&mut self) -> ParseResult<TsTypeAnnotation<'a>> {
+        let type_ = self.parse_type()?;
+
+        let annotation = if self.kind(Kind::Pipe) {
+            self.parse_type_union(type_)?
+        } else if self.kind(Kind::Ampersand) {
+            self.parse_type_intersection(type_)?
+        } else {
+            type_
+        };
+
+        Ok(annotation)
     }
 }

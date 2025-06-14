@@ -16,13 +16,13 @@ use crate::{
             ExpressionStatement, ForInLoop, ForInLoopLeft, ForLoop, ForLoopInit, Function,
             FunctionParams, Identifier, IdentifierOrLiteral, IfStatement, Import, ImportAttribute,
             ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier,
-            ImportSpecifierType, LabelledStatement, Location, LogicalExpression, LogicalOperator,
-            MemberExpression, MetaProperty, MethodDefinitionKind, NewExpression, NullLiteral,
-            NumericLiteral, ObjectExpression, ObjectExpressionMethod, ObjectExpressionMethodKind,
-            ObjectExpressionProperty, ObjectExpressionPropertyKind, ObjectPattern,
-            ObjectPatternProperty, ObjectPatternPropertyKind, Pattern, Regexp, RestElement,
-            ReturnStatement, SequenceExpression, SpreadElement, Statement, StringLiteral,
-            SwitchCase, SwitchStatement, TaggedTemplateLiteral, TemplateElement, TemplateLiteral,
+            ImportSpecifierType, LabelledStatement, Location, MemberExpression, MetaProperty,
+            MethodDefinitionKind, NewExpression, NullLiteral, NumericLiteral, ObjectExpression,
+            ObjectExpressionMethod, ObjectExpressionMethodKind, ObjectExpressionProperty,
+            ObjectExpressionPropertyKind, ObjectPattern, ObjectPatternProperty,
+            ObjectPatternPropertyKind, Pattern, Regexp, RestElement, ReturnStatement,
+            SequenceExpression, SpreadElement, Statement, StringLiteral, SwitchCase,
+            SwitchStatement, TaggedTemplateLiteral, TemplateElement, TemplateLiteral,
             ThisExpression, ThrowStatement, TryStatement, UnaryExpression, UnaryOperator,
             UpdateExpression, UpdateOperator, VariableDeclaration, VariableDeclarationKind,
             VariableDeclarator, WhileLoop, WithStatement,
@@ -66,7 +66,7 @@ pub struct Extensions {
 
 pub struct Parser<'a> {
     code: &'a str,
-    lexer: Tokenizer<'a>,
+    pub(crate) lexer: Tokenizer<'a>,
     pub(crate) ctx: ParserContext,
     pub(crate) token: Token,
     pub(crate) prev_token_end: u32,
@@ -140,7 +140,17 @@ impl<'a> Parser<'a> {
         self.lexer.diagnostics.push(ParserDiagnostics {
             error: DiagnosticError::Other(message),
             position: position.start as usize..position.end as usize,
-        })
+        });
+    }
+
+    pub fn report_unexpected_token(&mut self, expected: Kind) {
+        self.lexer.diagnostics.push(ParserDiagnostics {
+            error: DiagnosticError::UnexpectedToken {
+                expected,
+                found: self.token.kind,
+            },
+            position: self.token.start as usize..self.token.end as usize,
+        });
     }
 
     pub fn get_token_value(&self) -> &'a str {
@@ -169,55 +179,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn get_binary_precedence(&self) -> u8 {
-        match self.token.kind {
-            Kind::Question2 => 1,
-            Kind::Pipe2 => 2,
-            Kind::Ampersand2 => 3,
-            Kind::Pipe => 4,
-            Kind::Caret => 5,
-            Kind::Ampersand => 6,
-            Kind::Equal2 | Kind::NotEqual | Kind::Equal3 | Kind::NotEqual2 => 7,
-            Kind::LessThan
-            | Kind::LessThanOrEqual
-            | Kind::GreaterThan
-            | Kind::GreaterThanOrEqual => 8,
-            Kind::LeftShift | Kind::RightShift | Kind::UnsignedRightShift => 9,
-            Kind::Plus | Kind::Minus => 10,
-            Kind::Star | Kind::Slash | Kind::Mod => 11,
-            _ => 0,
-        }
-    }
-
-    pub fn get_binary_operator(&mut self, kind: Kind) -> BinaryOperator {
-        match kind {
-            Kind::Equal2 => BinaryOperator::Equality,
-            Kind::NotEqual => BinaryOperator::Inequality,
-            Kind::Equal3 => BinaryOperator::StrictEquality,
-            Kind::NotEqual2 => BinaryOperator::StrictInequality,
-            Kind::LessThan => BinaryOperator::LessThan,
-            Kind::LessThanOrEqual => BinaryOperator::LessThanOrEqual,
-            Kind::GreaterThan => BinaryOperator::GreaterThan,
-            Kind::GreaterThanOrEqual => BinaryOperator::GreaterThanOrEqual,
-            Kind::LeftShift => BinaryOperator::LeftShift,
-            Kind::RightShift => BinaryOperator::RightShift,
-            Kind::UnsignedRightShift => BinaryOperator::UnsignedRightShift,
-            Kind::Plus => BinaryOperator::Add,
-            Kind::Minus => BinaryOperator::Subtract,
-            Kind::Star => BinaryOperator::Multiply,
-            Kind::Star2 => BinaryOperator::Exponentiation,
-            Kind::Slash => BinaryOperator::Divide,
-            Kind::Mod => BinaryOperator::Mod,
-            Kind::Ampersand => BinaryOperator::BitwiseAND,
-            Kind::Pipe => BinaryOperator::BitwiseOR,
-            Kind::Caret => BinaryOperator::BitwiseXOR,
-            Kind::Question2 => BinaryOperator::Coalescing,
-            Kind::In => BinaryOperator::In,
-            Kind::Instanceof => BinaryOperator::Instanceof,
-            _ => unsafe { core::hint::unreachable_unchecked() },
-        }
-    }
-
     pub fn get_assignment_operator(&self, kind: Kind) -> Option<AssignmentOperator> {
         let op = match kind {
             Kind::Equal => AssignmentOperator::Equal,
@@ -237,14 +198,6 @@ impl<'a> Parser<'a> {
         };
 
         Some(op)
-    }
-
-    pub fn get_logical_operator(&self, kind: Kind) -> LogicalOperator {
-        match kind {
-            Kind::Ampersand2 => LogicalOperator::And,
-            Kind::Pipe2 => LogicalOperator::Or,
-            _ => unsafe { core::hint::unreachable_unchecked() },
-        }
     }
 
     pub fn is_curr_token_identifier(&self) -> bool {
@@ -541,7 +494,7 @@ impl<'a> Parser<'a> {
                         ObjectExpressionPropertyKind::Method(_) => {
                             self.add_diagnostic("invalid token", self.token.range());
                             return Err(());
-                        } 
+                        }
                         ObjectExpressionPropertyKind::Property(property) => {
                             ObjectPatternPropertyKind::Property(Box::new_in(
                                 ObjectPatternProperty {
@@ -666,7 +619,7 @@ impl<'a> Parser<'a> {
 
         if self.kind(Kind::ParenC) {
             self.bump();
-            self.bump_token(Kind::Arrow);
+            self.bump_token(Kind::Arrow)?;
 
             let (body, is_exp) = self.parse_arrow_function_body()?;
 
@@ -689,8 +642,8 @@ impl<'a> Parser<'a> {
                 rest_el, self.arena,
             )));
 
-            self.bump_token(Kind::ParenC);
-            self.bump_token(Kind::Arrow);
+            self.bump_token(Kind::ParenC)?;
+            self.bump_token(Kind::Arrow)?;
 
             let (body, is_exp) = self.parse_arrow_function_body()?;
 
@@ -713,12 +666,12 @@ impl<'a> Parser<'a> {
                 let mut expressions = ArenaVec::new_in(self.arena);
 
                 while !matches!(self.token.kind, Kind::EOF | Kind::ParenC) {
-                    self.bump_token(Kind::Comma);
+                    self.bump_token(Kind::Comma)?;
 
                     if self.kind(Kind::Dot3) {
                         let rest_element = self.parse_rest_element()?;
-                        self.bump_token(Kind::ParenC);
-                        self.bump_token(Kind::Arrow);
+                        self.bump_token(Kind::ParenC)?;
+                        self.bump_token(Kind::Arrow)?;
 
                         let mut params = ArenaVec::new_in(self.arena);
 
@@ -754,7 +707,7 @@ impl<'a> Parser<'a> {
                     }
                 }
 
-                self.bump_token(Kind::ParenC);
+                self.bump_token(Kind::ParenC)?;
                 self.in_paren = false;
 
                 if self.kind(Kind::Arrow) {
@@ -794,7 +747,7 @@ impl<'a> Parser<'a> {
                     )))
                 }
             } else {
-                self.bump_token(Kind::ParenC);
+                self.bump_token(Kind::ParenC)?;
                 self.in_paren = false;
 
                 if self.kind(Kind::Arrow) {
@@ -876,12 +829,12 @@ impl<'a> Parser<'a> {
                 }
 
                 if !self.kind(Kind::BracketC) {
-                    self.bump_token(Kind::Comma);
+                    self.bump_token(Kind::Comma)?;
                 }
             }
         }
 
-        self.bump_token(Kind::BracketC);
+        self.bump_token(Kind::BracketC)?;
 
         Ok(Expression::ArrayExpression(Box::new_in(
             ArrayExpression {
@@ -919,7 +872,7 @@ impl<'a> Parser<'a> {
         }
 
         let type_parameters = if self.extensions.ts && self.kind(Kind::LessThan) {
-            Some(self.parse_type_parameter_declaration())
+            Some(self.parse_type_parameter_declaration()?)
         } else {
             None
         };
@@ -1395,7 +1348,7 @@ impl<'a> Parser<'a> {
         self.assert(!is_id_optional && id.is_none(), "class id is required")?;
 
         let type_parameters = if self.extensions.ts && self.kind(Kind::LessThan) {
-            Some(self.parse_type_parameter_declaration())
+            Some(self.parse_type_parameter_declaration()?)
         } else {
             None
         };
@@ -1413,7 +1366,7 @@ impl<'a> Parser<'a> {
             self.bump();
 
             while matches!(self.token.kind, Kind::EOF | Kind::BracketO) {
-                implements.push(self.parse_ts_interface_heritage());
+                implements.push(self.parse_ts_interface_heritage()?);
 
                 if self.kind(Kind::Comma) {
                     self.bump();
@@ -1626,11 +1579,11 @@ impl<'a> Parser<'a> {
             }
 
             if !self.kind(Kind::ParenC) {
-                self.bump_token(Kind::Comma);
+                self.bump_token(Kind::Comma)?;
             }
         }
 
-        self.bump_token(Kind::ParenC);
+        self.bump_token(Kind::ParenC)?;
 
         Ok(args)
     }
@@ -1695,7 +1648,7 @@ impl<'a> Parser<'a> {
         self.assert(!is_id_optional && id.is_none(), "function id is required")?;
 
         let type_parameters = if self.extensions.ts && self.kind(Kind::LessThan) {
-            Some(self.parse_type_parameter_declaration())
+            Some(self.parse_type_parameter_declaration()?)
         } else {
             None
         };
@@ -1860,9 +1813,9 @@ impl<'a> Parser<'a> {
                     self.arena,
                 ))
             } else if self.extensions.ts && self.kind(Kind::LessThan) {
-                let type_parameter_arguments = self.parse_type_parameter_arguments();
+                let type_parameter_arguments = self.parse_type_parameter_arguments()?;
 
-                self.assert(is_optional && self.kind(Kind::ParenO), "expected (")?;
+                // todo: add a check func to ensure that the type parameters are not a binary exp.
 
                 exp = Expression::TsInstantiationExpression(Box::new_in(
                     TsInstantiationExpression {
@@ -1873,6 +1826,8 @@ impl<'a> Parser<'a> {
                     },
                     self.arena,
                 ))
+            } else if self.extensions.ts && self.kind(Kind::Bang) && !self.token.is_on_new_line {
+                exp = self.parse_ts_non_null_expression(exp);
             } else {
                 break;
             }
@@ -1955,65 +1910,84 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_exponentiation_expression(&mut self) -> ParseResult<Expression<'a>> {
-        let exp = self.parse_unary_expression()?;
+    pub fn parse_binary_expression(&mut self) -> ParseResult<Expression<'a>> {
+        let mut stack: ArenaVec<'_, (Option<BinaryOperator>, Expression<'a>)> =
+            ArenaVec::new_in(self.arena);
 
-        match exp {
-            Expression::UnaryExpression(_) => Ok(exp),
-            _ => {
-                if self.kind(Kind::Star2) {
-                    let right = self.parse_exponentiation_expression()?;
+        stack.push((None, self.parse_unary_expression()?));
 
-                    Ok(Expression::BinaryExpression(Box::new_in(
+        while let Some(op) = BinaryOperator::from(self.token.kind) {
+            let (prev_op, _) = unsafe { stack.last().unwrap_unchecked() };
+
+            let prev_precedence = if let Some(op) = prev_op {
+                if BinaryOperator::As == *op {
+                    let (_, prev_exp) = unsafe { stack.pop().unwrap_unchecked() };
+
+                    stack.push((None, self.parse_ts_as_expression(prev_exp)?));
+                    continue;
+                } else if BinaryOperator::Satisfies == *op {
+                    let (_, prev_exp) = unsafe { stack.pop().unwrap_unchecked() };
+
+                    stack.push((None, self.parse_ts_satisfies_expression(prev_exp)?));
+                    continue;
+                }
+
+                op.precedence()
+            } else {
+                0
+            };
+
+            let precedence = op.precedence();
+
+            // skip the operator
+            self.bump();
+
+            if precedence < prev_precedence {
+                let (mut temp_op, mut exp) = unsafe { stack.pop().unwrap_unchecked() };
+
+                while let Some((curr_op, left)) = stack.pop() {
+                    let end = exp.end();
+
+                    exp = Expression::BinaryExpression(Box::new_in(
                         BinaryExpression {
-                            start: exp.start(),
-                            left: exp,
-                            operator: BinaryOperator::Exponentiation,
-                            right,
-                            end: self.prev_token_end,
+                            start: left.start(),
+                            left,
+                            operator: unsafe { temp_op.unwrap_unchecked() },
+                            right: exp,
+                            end,
                             parenthesized: self.in_paren,
                         },
                         self.arena,
-                    )))
-                } else {
-                    Ok(exp)
+                    ));
+
+                    temp_op = curr_op;
                 }
+
+                stack.push((None, exp));
+                stack.push((Some(op), self.parse_unary_expression()?))
+            } else {
+                stack.push((Some(op), self.parse_unary_expression()?));
             }
         }
-    }
 
-    pub fn parse_binary_expression(&mut self) -> ParseResult<Expression<'a>> {
-        let mut exp = self.parse_exponentiation_expression()?;
+        let (mut temp_op, mut exp) = unsafe { stack.pop().unwrap_unchecked() };
 
-        while self.get_binary_precedence() > 0 {
-            let operator = self.consume_token();
-            let right = self.parse_exponentiation_expression()?;
+        while let Some((curr_op, left)) = stack.pop() {
+            let end = exp.end();
 
-            if matches!(operator, Kind::Ampersand2 | Kind::Pipe2) {
-                exp = Expression::LogicalExpression(Box::new_in(
-                    LogicalExpression {
-                        start: exp.start(),
-                        left: exp,
-                        operator: self.get_logical_operator(operator),
-                        right,
-                        end: self.prev_token_end,
-                        parenthesized: self.in_paren,
-                    },
-                    self.arena,
-                ))
-            } else {
-                exp = Expression::BinaryExpression(Box::new_in(
-                    BinaryExpression {
-                        start: exp.start(),
-                        left: exp,
-                        operator: self.get_binary_operator(operator),
-                        right,
-                        end: self.prev_token_end,
-                        parenthesized: self.in_paren,
-                    },
-                    self.arena,
-                ))
-            }
+            exp = Expression::BinaryExpression(Box::new_in(
+                BinaryExpression {
+                    start: left.start(),
+                    left,
+                    operator: unsafe { temp_op.unwrap_unchecked() },
+                    right: exp,
+                    end,
+                    parenthesized: self.in_paren,
+                },
+                self.arena,
+            ));
+
+            temp_op = curr_op;
         }
 
         Ok(exp)
@@ -2619,7 +2593,7 @@ impl<'a> Parser<'a> {
             body.push(self.parse_statement()?);
         }
 
-        self.bump_token(Kind::BracesC);
+        self.bump_token(Kind::BracesC)?;
 
         Ok(Block {
             start,
@@ -3146,19 +3120,6 @@ impl<'a> Parser<'a> {
         Ok(exp)
     }
 
-    pub fn parse_expression_statement(&mut self) -> ParseResult<Statement<'a>> {
-        let exp = self.parse_expression()?;
-
-        Ok(Statement::ExpressionStatement(Box::new_in(
-            ExpressionStatement {
-                start: exp.start(),
-                exp,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        )))
-    }
-
     pub fn parse_statement(&mut self) -> ParseResult<Statement<'a>> {
         let statement = match self.token.kind {
             Kind::Const => self.parse_variable_declaration(VariableDeclarationKind::Const),
@@ -3191,14 +3152,25 @@ impl<'a> Parser<'a> {
                     self.parse_labelled_statement()
                 }
             }
-            // Kind::Type if self.extensions.ts => {
-            //     if is_identifier(self.lexer.peek(LexContext::Normal).kind) {
-            //     } else {
-            //         self.parse_labelled_statement()
-            //     }
-            // }
-            Kind::Identifier => self.parse_labelled_statement(),
-            _ => self.parse_expression_statement(),
+            Kind::Type if self.extensions.ts => {
+                let peeked_token = self.lexer.peek(LexContext::Normal);
+
+                if is_identifier(peeked_token.kind) && !peeked_token.is_on_new_line {
+                    self.parse_ts_type_alias_declaration()
+                } else {
+                    self.parse_labelled_statement()
+                }
+            }
+            Kind::Interface if self.extensions.ts => {
+                let peeked_token = self.lexer.peek(LexContext::Normal);
+
+                if is_identifier(peeked_token.kind) && !peeked_token.is_on_new_line {
+                    self.parse_ts_interface_declaration()
+                } else {
+                    self.parse_labelled_statement()
+                }
+            }
+            _ => self.parse_labelled_statement(),
         };
 
         if self.kind(Kind::Semicolon) {

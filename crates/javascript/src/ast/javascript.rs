@@ -4,7 +4,11 @@ use super::typescript::{
     TsInstantiationExpression, TsInterfaceDeclaration, TsInterfaceHeritage, TsTypeAliasDeclaration,
     TsTypeAnnotation, TsTypeParameterDeclaration,
 };
-use crate::allocator::CloneIn;
+use crate::{
+    allocator::CloneIn,
+    ast::typescript::{TsAsExpression, TsNonNullExpression, TsSatisfiesExpression},
+    kind::Kind,
+};
 use bumpalo::{boxed::Box, collections::Vec, Bump};
 use macros::{CloneIn, Location};
 
@@ -205,7 +209,7 @@ pub struct ObjectExpression<'a> {
     pub parenthesized: bool,
 }
 
-#[derive(Debug, CloneIn)]
+#[derive(Debug, CloneIn, PartialEq)]
 pub enum BinaryOperator {
     Equality,
     Inequality,
@@ -227,40 +231,103 @@ pub enum BinaryOperator {
     BitwiseAND,
     BitwiseOR,
     BitwiseXOR,
+    And,
+    Or,
     Coalescing,
     In,
     Instanceof,
+    As,
+    Satisfies,
 }
 
 impl<'a> BinaryOperator {
     pub fn as_str(&self) -> &'a str {
-        use BinaryOperator::*;
-
         match self {
-            Equality => "==",
-            Inequality => "!=",
-            StrictEquality => "===",
-            StrictInequality => "!==",
-            LessThan => "<",
-            LessThanOrEqual => "<=",
-            GreaterThan => ">",
-            GreaterThanOrEqual => ">=",
-            LeftShift => "<<",
-            RightShift => ">>",
-            UnsignedRightShift => ">>>",
-            Add => "+",
-            Subtract => "-",
-            Multiply => "*",
-            Exponentiation => "**",
-            Divide => "/",
-            Mod => "%",
-            BitwiseAND => "&",
-            BitwiseOR => "|",
-            BitwiseXOR => "^",
-            Coalescing => "??",
-            In => "in",
-            Instanceof => "instanceof",
+            Self::Equality => "==",
+            Self::Inequality => "!=",
+            Self::StrictEquality => "===",
+            Self::StrictInequality => "!==",
+            Self::LessThan => "<",
+            Self::LessThanOrEqual => "<=",
+            Self::GreaterThan => ">",
+            Self::GreaterThanOrEqual => ">=",
+            Self::LeftShift => "<<",
+            Self::RightShift => ">>",
+            Self::UnsignedRightShift => ">>>",
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::Multiply => "*",
+            Self::Exponentiation => "**",
+            Self::Divide => "/",
+            Self::Mod => "%",
+            Self::BitwiseAND => "&",
+            Self::BitwiseOR => "|",
+            Self::BitwiseXOR => "^",
+            Self::Coalescing => "??",
+            Self::In => "in",
+            Self::Instanceof => "instanceof",
+            Self::As => "as",
+            Self::Satisfies => "satisfies",
+            Self::Or => "||",
+            Self::And => "&&",
         }
+    }
+
+    pub fn precedence(&self) -> u8 {
+        match self {
+            Self::Coalescing => 1,
+            Self::Or => 2,
+            Self::And => 3,
+            Self::BitwiseOR => 4,
+            Self::BitwiseXOR => 5,
+            Self::BitwiseAND => 6,
+            Self::Equality | Self::Inequality | Self::StrictEquality | Self::StrictInequality => 7,
+            Self::LessThan
+            | Self::LessThanOrEqual
+            | Self::GreaterThan
+            | Self::GreaterThanOrEqual
+            | Self::Instanceof
+            | Self::In
+            | Self::As
+            | Self::Satisfies => 8,
+            Self::LeftShift | Self::RightShift | Self::UnsignedRightShift => 9,
+            Self::Add | Self::Subtract => 10,
+            Self::Multiply | Self::Divide | Self::Mod => 11,
+            Self::Exponentiation => 12,
+        }
+    }
+
+    pub fn from(kind: Kind) -> Option<Self> {
+        Some(match kind {
+            Kind::Question2 => BinaryOperator::Coalescing,
+            Kind::Pipe2 => BinaryOperator::Or,
+            Kind::Ampersand2 => BinaryOperator::And,
+            Kind::Pipe => BinaryOperator::BitwiseOR,
+            Kind::Caret => BinaryOperator::BitwiseXOR,
+            Kind::Ampersand => BinaryOperator::BitwiseAND,
+            Kind::Equal2 => BinaryOperator::Equality,
+            Kind::NotEqual => BinaryOperator::Inequality,
+            Kind::Equal3 => BinaryOperator::StrictEquality,
+            Kind::NotEqual2 => BinaryOperator::StrictInequality,
+            Kind::LessThan => BinaryOperator::LessThan,
+            Kind::LessThanOrEqual => BinaryOperator::LessThanOrEqual,
+            Kind::GreaterThan => BinaryOperator::GreaterThan,
+            Kind::GreaterThanOrEqual => BinaryOperator::GreaterThanOrEqual,
+            Kind::Instanceof => BinaryOperator::Instanceof,
+            Kind::In => BinaryOperator::In,
+            Kind::As => BinaryOperator::As,
+            Kind::Satisfies => BinaryOperator::Satisfies,
+            Kind::LeftShift => BinaryOperator::LeftShift,
+            Kind::RightShift => BinaryOperator::RightShift,
+            Kind::UnsignedRightShift => BinaryOperator::UnsignedRightShift,
+            Kind::Plus => BinaryOperator::Add,
+            Kind::Minus => BinaryOperator::Subtract,
+            Kind::Star => BinaryOperator::Multiply,
+            Kind::Slash => BinaryOperator::Divide,
+            Kind::Mod => BinaryOperator::Mod,
+            Kind::Star2 => BinaryOperator::Exponentiation,
+            _ => return None,
+        })
     }
 }
 
@@ -269,31 +336,6 @@ pub struct BinaryExpression<'a> {
     pub start: u32,
     pub left: Expression<'a>,
     pub operator: BinaryOperator,
-    pub right: Expression<'a>,
-    pub end: u32,
-    pub parenthesized: bool,
-}
-
-#[derive(Debug, CloneIn)]
-pub enum LogicalOperator {
-    And,
-    Or,
-}
-
-impl LogicalOperator {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::And => "&&",
-            Self::Or => "||",
-        }
-    }
-}
-
-#[derive(Debug, CloneIn)]
-pub struct LogicalExpression<'a> {
-    pub start: u32,
-    pub left: Expression<'a>,
-    pub operator: LogicalOperator,
     pub right: Expression<'a>,
     pub end: u32,
     pub parenthesized: bool,
@@ -515,7 +557,6 @@ pub enum Expression<'a> {
     ArrayExpression(Box<'a, ArrayExpression<'a>>),
     ObjectExpression(Box<'a, ObjectExpression<'a>>),
     BinaryExpression(Box<'a, BinaryExpression<'a>>),
-    LogicalExpression(Box<'a, LogicalExpression<'a>>),
     AssignmentExpression(Box<'a, AssignmentExpression<'a>>),
     UpdateExpression(Box<'a, UpdateExpression<'a>>),
     UnaryExpression(Box<'a, UnaryExpression<'a>>),
@@ -535,9 +576,12 @@ pub enum Expression<'a> {
     MetaProperty(Box<'a, MetaProperty<'a>>),
     SpreadElement(Box<'a, SpreadElement<'a>>),
     Elision(Box<'a, Elision>),
-    
+
     // Typescript specific expressions
     TsInstantiationExpression(Box<'a, TsInstantiationExpression<'a>>),
+    TsAsExpression(Box<'a, TsAsExpression<'a>>),
+    TsSatisfiesExpression(Box<'a, TsSatisfiesExpression<'a>>),
+    TsNonNullExpression(Box<'a, TsNonNullExpression<'a>>),
 }
 
 #[derive(Debug, CloneIn)]

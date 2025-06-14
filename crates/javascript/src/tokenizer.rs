@@ -28,7 +28,7 @@ impl Token {
 }
 
 #[derive(Debug)]
-pub enum LexContext { 
+pub enum LexContext {
     Normal,
     Template,
 }
@@ -679,21 +679,19 @@ impl<'a> Tokenizer<'a> {
 
     fn resolve_less_than(&mut self) -> Kind {
         match self.next_byte() {
+            Some(b'<') => {
+                if Some(b'=') == self.next_byte() {
+                    self.advance(1);
+                    Kind::LeftShiftEqual
+                } else {
+                    Kind::LeftShift
+                }
+            }
             Some(b'=') => {
                 self.advance(1);
                 Kind::LessThanOrEqual
             }
             _ => Kind::LessThan,
-        }
-    }
-
-    fn resolve_greater_than(&mut self) -> Kind {
-        match self.next_byte() {
-            Some(b'=') => {
-                self.advance(1);
-                Kind::GreaterThanOrEqual
-            }
-            _ => Kind::GreaterThan,
         }
     }
 
@@ -914,13 +912,13 @@ impl<'a> Tokenizer<'a> {
             Pipe => self.resolve_pipe(),
             Question => self.resolve_question(),
             Bang => self.resolve_bang(),
-            GreaterThan => self.resolve_greater_than(),
+            LessThan => self.resolve_less_than(),
             Equal => self.resolve_equal(),
             Caret => self.resolve_caret(),
             Identifier | Dollar => self.resolve_identifier(),
             Quote => self.resolve_string_literal(),
 
-            LessThan => self.eat_byte(Kind::LessThan),
+            GreaterThan => self.eat_byte(Kind::GreaterThan),
             Backquote => self.eat_byte(Kind::BackQuote),
             Comma => self.eat_byte(Kind::Comma),
             ParenO => self.eat_byte(Kind::ParenO),

@@ -232,7 +232,7 @@ pub struct TsInterfaceHeritage<'a> {
     pub start: u32,
     pub expression: IdentifierOrMemberExpression<'a>,
     pub type_parameter_arguments: Option<TsTypeParameterArguments<'a>>,
-    pub end: u32
+    pub end: u32,
 }
 
 #[derive(Debug, CloneIn)]
@@ -250,5 +250,28 @@ pub struct TsInstantiationExpression<'a> {
     pub start: u32,
     pub expression: Expression<'a>,
     pub type_parameter_arguments: TsTypeParameterArguments<'a>,
+    pub end: u32,
+}
+
+#[derive(Debug, CloneIn)]
+pub struct TsAsExpression<'a> {
+    pub start: u32,
+    pub expression: Expression<'a>,
+    pub type_annotation: TsTypeAnnotation<'a>,
+    pub end: u32,
+}
+
+#[derive(Debug, CloneIn)]
+pub struct TsSatisfiesExpression<'a> {
+    pub start: u32,
+    pub expression: Expression<'a>,
+    pub type_annotation: TsTypeAnnotation<'a>,
+    pub end: u32,
+}
+
+#[derive(Debug, CloneIn)]
+pub struct TsNonNullExpression<'a> {
+    pub start: u32,
+    pub expression: Expression<'a>,
     pub end: u32,
 }
