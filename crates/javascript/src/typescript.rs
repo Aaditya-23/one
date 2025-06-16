@@ -2,19 +2,16 @@ use bumpalo::{boxed::Box, collections::Vec, Bump};
 
 use crate::{
     ast::{
-        javascript::{
-            Expression, FunctionParams, Identifier, Location, MemberExpression, Statement,
-        },
+        javascript::{Expression, Identifier, Location, MemberExpression, Statement},
         typescript::{
             IdentifierOrMemberExpression, IdentifierOrQualifiedName, TsAsExpression,
             TsIndexedAccess, TsInterfaceDeclaration, TsInterfaceHeritage, TsMethodSignature,
             TsNonNullExpression, TsPropertyMember, TsPropertySignature, TsSatisfiesExpression,
-            TsTypeAliasDeclaration, TsTypeAnnotation, TsTypeAny, TsTypeArray, TsTypeBoolean,
-            TsTypeIdentifier, TsTypeIntersection, TsTypeLiteral, TsTypeNull, TsTypeNumber,
-            TsTypeObjectLiteral, TsTypeOperator, TsTypeOperatorKind, TsTypeParameter,
-            TsTypeParameterArguments, TsTypeParameterDeclaration, TsTypeParenthesized,
-            TsTypeQualifiedName, TsTypeReference, TsTypeString, TsTypeTuple, TsTypeUndefined,
-            TsTypeUnion,
+            TsTypeAliasDeclaration, TsTypeAnnotation, TsTypeAny, TsTypeArray, TsTypeIdentifier,
+            TsTypeIntersection, TsTypeLiteral, TsTypeObjectLiteral, TsTypeOperator,
+            TsTypeOperatorKind, TsTypeParameter, TsTypeParameterArguments,
+            TsTypeParameterDeclaration, TsTypeParenthesized, TsTypeQualifiedName, TsTypeReference,
+            TsTypeTuple, TsTypeUndefined, TsTypeUnion,
         },
     },
     kind::Kind,
@@ -39,48 +36,15 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_type_string(&mut self) -> TsTypeAnnotation<'a> {
-        let start = self.token.start;
-
-        // skip string
-        self.bump();
-
-        TsTypeAnnotation::String(Box::new_in(
-            TsTypeString {
-                start,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ))
+        TsTypeAnnotation::String(Box::new_in(self.parse_string_literal(), self.arena))
     }
 
     pub fn parse_type_number(&mut self) -> TsTypeAnnotation<'a> {
-        let start = self.token.start;
-
-        // skip number
-        self.bump();
-
-        TsTypeAnnotation::Number(Box::new_in(
-            TsTypeNumber {
-                start,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ))
+        TsTypeAnnotation::Number(Box::new_in(self.parse_numeric_literal(), self.arena))
     }
 
     pub fn parse_type_boolean(&mut self) -> TsTypeAnnotation<'a> {
-        let start = self.token.start;
-
-        // skip boolean
-        self.bump();
-
-        TsTypeAnnotation::Boolean(Box::new_in(
-            TsTypeBoolean {
-                start,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ))
+        TsTypeAnnotation::Boolean(Box::new_in(self.parse_boolean_literal(), self.arena))
     }
 
     pub fn parse_type_any(&mut self) -> TsTypeAnnotation<'a> {
@@ -114,18 +78,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_type_null(&mut self) -> TsTypeAnnotation<'a> {
-        let start = self.token.start;
-
-        // skip null
-        self.bump();
-
-        TsTypeAnnotation::Null(Box::new_in(
-            TsTypeNull {
-                start,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ))
+        TsTypeAnnotation::Null(Box::new_in(self.parse_null_literal(), self.arena))
     }
 
     pub fn parse_type_literal(&mut self) -> TsTypeAnnotation<'a> {

@@ -1,4 +1,7 @@
-use crate::allocator::CloneIn;
+use crate::{
+    allocator::CloneIn,
+    ast::javascript::{BooleanLiteral, NullLiteral, NumericLiteral, StringLiteral},
+};
 use bumpalo::{boxed::Box, collections::Vec, Bump};
 use macros::{CloneIn, Location};
 
@@ -11,24 +14,6 @@ pub struct TsTypeIdentifier {
 }
 
 #[derive(Debug, CloneIn)]
-pub struct TsTypeString {
-    pub start: u32,
-    pub end: u32,
-}
-
-#[derive(Debug, CloneIn)]
-pub struct TsTypeNumber {
-    pub start: u32,
-    pub end: u32,
-}
-
-#[derive(Debug, CloneIn)]
-pub struct TsTypeBoolean {
-    pub start: u32,
-    pub end: u32,
-}
-
-#[derive(Debug, CloneIn)]
 pub struct TsTypeAny {
     pub start: u32,
     pub end: u32,
@@ -36,12 +21,6 @@ pub struct TsTypeAny {
 
 #[derive(Debug, CloneIn)]
 pub struct TsTypeUndefined {
-    pub start: u32,
-    pub end: u32,
-}
-
-#[derive(Debug, CloneIn)]
-pub struct TsTypeNull {
     pub start: u32,
     pub end: u32,
 }
@@ -193,12 +172,12 @@ pub struct TsTypeParenthesized<'a> {
 
 #[derive(Debug, CloneIn, Location)]
 pub enum TsTypeAnnotation<'a> {
-    String(Box<'a, TsTypeString>),
-    Number(Box<'a, TsTypeNumber>),
-    Boolean(Box<'a, TsTypeBoolean>),
+    String(Box<'a, StringLiteral>),
+    Number(Box<'a, NumericLiteral>),
+    Boolean(Box<'a, BooleanLiteral>),
     Any(Box<'a, TsTypeAny>),
     Undefined(Box<'a, TsTypeUndefined>),
-    Null(Box<'a, TsTypeNull>),
+    Null(Box<'a, NullLiteral>),
     Literal(Box<'a, TsTypeLiteral>),
     ObjectLiteral(Box<'a, TsTypeObjectLiteral<'a>>),
     Array(Box<'a, TsTypeArray<'a>>),

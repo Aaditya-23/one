@@ -6,32 +6,28 @@ use crate::{
     allocator::CloneIn,
     ast::{
         javascript::{
-            ArrayExpression, ArrayPattern, ArrayPatternKind, ArrowFunction, ArrowFunctionBody,
-            AssignmentExpression, AssignmentExpressionLHS, AssignmentOperator, AssignmentPattern,
-            AwaitExpression, BinaryExpression, BinaryOperator, Block, BooleanLiteral,
-            BreakStatement, CallExpression, CatchClause, Class, ClassBody, ClassMethod,
-            ClassProperty, ConditionalExpression, ContinueStatement, DebuggerStatement,
-            Declaration, DoWhileLoop, Elision, EmptyStatement, ExportAllDeclaration,
-            ExportDefaultDeclaration, ExportNamedDeclaration, ExportSpecifier, Expression,
-            ExpressionStatement, ForInLoop, ForInLoopLeft, ForLoop, ForLoopInit, Function,
-            FunctionParams, Identifier, IdentifierOrLiteral, IfStatement, Import, ImportAttribute,
-            ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier,
-            ImportSpecifierType, LabelledStatement, Location, MemberExpression, MetaProperty,
-            MethodDefinitionKind, NewExpression, NullLiteral, NumericLiteral, ObjectExpression,
-            ObjectExpressionMethod, ObjectExpressionMethodKind, ObjectExpressionProperty,
-            ObjectExpressionPropertyKind, ObjectPattern, ObjectPatternProperty,
-            ObjectPatternPropertyKind, Pattern, Regexp, RestElement, ReturnStatement,
-            SequenceExpression, SpreadElement, Statement, StringLiteral, SwitchCase,
-            SwitchStatement, TaggedTemplateLiteral, TemplateElement, TemplateLiteral,
-            ThisExpression, ThrowStatement, TryStatement, UnaryExpression, UnaryOperator,
-            UpdateExpression, UpdateOperator, VariableDeclaration, VariableDeclarationKind,
-            VariableDeclarator, WhileLoop, WithStatement,
+            ArrayElement, ArrayExpression, ArrayPattern, ArrayPatternKind, ArrowFunction,
+            ArrowFunctionBody, AssignmentExpression, AssignmentExpressionLHS, AssignmentOperator,
+            AssignmentPattern, AwaitExpression, BinaryExpression, BinaryOperator, Block,
+            BooleanLiteral, BreakStatement, CallExpression, CatchClause, Class, ClassBody,
+            ClassMethod, ClassProperty, ConditionalExpression, ContinueStatement,
+            DebuggerStatement, Declaration, DoWhileLoop, Elision, EmptyStatement,
+            ExportAllDeclaration, ExportDefaultDeclaration, ExportNamedDeclaration,
+            ExportSpecifier, Expression, ExpressionStatement, ForInLoop, ForInLoopLeft, ForLoop,
+            ForLoopInit, Function, FunctionArgument, FunctionParam, Identifier,
+            IdentifierOrLiteral, IfStatement, Import, ImportAttribute, ImportDeclaration,
+            ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier, ImportSpecifierType,
+            LabelledStatement, Location, MemberExpression, MetaProperty, MethodDefinitionKind,
+            NewExpression, NullLiteral, NumericLiteral, ObjectExpression, ObjectExpressionMethod,
+            ObjectExpressionMethodKind, ObjectExpressionProperty, ObjectExpressionPropertyKind,
+            ObjectPattern, ObjectPatternProperty, ObjectPatternPropertyKind, Pattern, Regexp,
+            RestElement, ReturnStatement, SequenceExpression, SpreadElement, Statement,
+            StringLiteral, SwitchCase, SwitchStatement, TaggedTemplateLiteral, TemplateElement,
+            TemplateLiteral, ThisExpression, ThrowStatement, TryStatement, UnaryExpression,
+            UnaryOperator, UpdateExpression, UpdateOperator, VariableDeclaration,
+            VariableDeclarationKind, VariableDeclarator, WhileLoop, WithStatement,
         },
-        typescript::{
-            TsInstantiationExpression, TsTypeAnnotation, TsTypeAny, TsTypeBoolean, TsTypeLiteral,
-            TsTypeNull, TsTypeNumber, TsTypeOperator, TsTypeOperatorKind, TsTypeReference,
-            TsTypeString, TsTypeTuple, TsTypeUndefined,
-        },
+        typescript::TsInstantiationExpression,
     },
     kind::Kind,
     tokenizer::{LexContext, Token, Tokenizer},
@@ -202,6 +198,10 @@ impl<'a> Parser<'a> {
 
     pub fn is_curr_token_identifier(&self) -> bool {
         is_identifier(self.token.kind)
+    }
+
+    pub fn is_curr_token_a_reserved_keyword(&self) -> bool {
+        is_reserved_keyword(self.token.kind)
     }
 
     pub fn parse_identifier(&mut self) -> Identifier<'a> {
@@ -554,19 +554,21 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_numeric_literal(&mut self) -> Expression<'a> {
+    pub fn parse_numeric_literal(&mut self) -> NumericLiteral {
         let start = self.token.start;
 
         // skip numeric literal
         self.bump();
 
-        Expression::NumericLiteral(Box::new_in(
-            NumericLiteral {
-                start,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ))
+        NumericLiteral {
+            start,
+            end: self.prev_token_end,
+        }
+    }
+
+    pub fn parse_numeric_literal_expression(&mut self) -> Expression<'a> {
+        let literal = self.parse_numeric_literal();
+        Expression::NumericLiteral(Box::new_in(literal, self.arena))
     }
 
     pub fn parse_string_literal(&mut self) -> StringLiteral {
@@ -581,34 +583,36 @@ impl<'a> Parser<'a> {
 
     pub fn parse_string_literal_expression(&mut self) -> Expression<'a> {
         let literal = self.parse_string_literal();
-
         Expression::StringLiteral(Box::new_in(literal, self.arena))
     }
 
-    pub fn parse_boolean_literal(&mut self) -> Expression<'a> {
+    pub fn parse_boolean_literal(&mut self) -> BooleanLiteral {
         let start = self.token.start;
         self.bump();
 
-        Expression::BooleanLiteral(Box::new_in(
-            BooleanLiteral {
-                start,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ))
+        BooleanLiteral {
+            start,
+            end: self.prev_token_end,
+        }
+    }
+    pub fn parse_boolean_literal_expression(&mut self) -> Expression<'a> {
+        let literal = self.parse_boolean_literal();
+        Expression::BooleanLiteral(Box::new_in(literal, self.arena))
     }
 
-    pub fn parse_null_literal(&mut self) -> Expression<'a> {
+    pub fn parse_null_literal(&mut self) -> NullLiteral {
         let start = self.token.start;
         self.bump();
 
-        Expression::NullLiteral(Box::new_in(
-            NullLiteral {
-                start,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ))
+        NullLiteral {
+            start,
+            end: self.prev_token_end,
+        }
+    }
+
+    pub fn parse_null_literal_expression(&mut self) -> Expression<'a> {
+        let literal = self.parse_null_literal();
+        Expression::NullLiteral(Box::new_in(literal, self.arena))
     }
 
     pub fn parse_group_expression(&mut self) -> ParseResult<Expression<'a>> {
@@ -638,9 +642,7 @@ impl<'a> Parser<'a> {
             let rest_el = self.parse_rest_element()?;
             let mut params = ArenaVec::new_in(self.arena);
 
-            params.push(FunctionParams::RestElement(Box::new_in(
-                rest_el, self.arena,
-            )));
+            params.push(FunctionParam::RestElement(Box::new_in(rest_el, self.arena)));
 
             self.bump_token(Kind::ParenC)?;
             self.bump_token(Kind::Arrow)?;
@@ -676,13 +678,13 @@ impl<'a> Parser<'a> {
                         let mut params = ArenaVec::new_in(self.arena);
 
                         for exp in expressions.into_iter() {
-                            params.push(FunctionParams::Pattern(Box::new_in(
+                            params.push(FunctionParam::Pattern(Box::new_in(
                                 self.reinterpret_as_pattern(exp)?,
                                 self.arena,
                             )))
                         }
 
-                        params.push(FunctionParams::RestElement(Box::new_in(
+                        params.push(FunctionParam::RestElement(Box::new_in(
                             rest_element,
                             self.arena,
                         )));
@@ -716,7 +718,7 @@ impl<'a> Parser<'a> {
                     let mut params = ArenaVec::new_in(self.arena);
 
                     for exp in expressions.into_iter() {
-                        params.push(FunctionParams::Pattern(Box::new_in(
+                        params.push(FunctionParam::Pattern(Box::new_in(
                             self.reinterpret_as_pattern(exp)?,
                             self.arena,
                         )))
@@ -754,7 +756,7 @@ impl<'a> Parser<'a> {
                     self.bump();
 
                     let mut params = ArenaVec::new_in(self.arena);
-                    params.push(FunctionParams::Pattern(Box::new_in(
+                    params.push(FunctionParam::Pattern(Box::new_in(
                         self.reinterpret_as_pattern(exp)?,
                         self.arena,
                     )));
@@ -779,7 +781,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_spread_element(&mut self) -> ParseResult<Expression<'a>> {
+    pub fn parse_spread_element(&mut self) -> ParseResult<SpreadElement<'a>> {
         let start = self.token.start;
 
         // skip ...
@@ -787,27 +789,21 @@ impl<'a> Parser<'a> {
 
         let argument = self.parse_assignment_expression()?;
 
-        Ok(Expression::SpreadElement(Box::new_in(
-            SpreadElement {
-                start,
-                argument,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        )))
+        Ok(SpreadElement {
+            start,
+            argument,
+            end: self.prev_token_end,
+        })
     }
 
-    pub fn parse_elision(&mut self) -> Expression<'a> {
+    pub fn parse_elision(&mut self) -> Elision {
         let start = self.token.start;
         self.bump();
 
-        Expression::Elision(Box::new_in(
-            Elision {
-                start,
-                end: self.prev_token_end,
-            },
-            self.arena,
-        ))
+        Elision {
+            start,
+            end: self.prev_token_end,
+        }
     }
 
     pub fn parse_array_expression(&mut self) -> ParseResult<Expression<'a>> {
@@ -819,19 +815,29 @@ impl<'a> Parser<'a> {
         let mut elements = ArenaVec::new_in(self.arena);
 
         while !matches!(self.token.kind, Kind::EOF | Kind::BracketC) {
+            let el;
+
             if self.kind(Kind::Comma) {
-                elements.push(self.parse_elision())
+                el = ArrayElement::Elision(Box::new_in(self.parse_elision(), self.arena));
             } else {
                 if self.kind(Kind::Dot3) {
-                    elements.push(self.parse_spread_element()?)
+                    el = ArrayElement::SpreadElement(Box::new_in(
+                        self.parse_spread_element()?,
+                        self.arena,
+                    ));
                 } else {
-                    elements.push(self.parse_assignment_expression()?);
+                    el = ArrayElement::Expression(Box::new_in(
+                        self.parse_assignment_expression()?,
+                        self.arena,
+                    ));
                 }
 
                 if !self.kind(Kind::BracketC) {
                     self.bump_token(Kind::Comma)?;
                 }
             }
+
+            elements.push(el)
         }
 
         self.bump_token(Kind::BracketC)?;
@@ -1073,10 +1079,7 @@ impl<'a> Parser<'a> {
 
         while !matches!(self.token.kind, Kind::EOF | Kind::BracesC) {
             if self.kind(Kind::Dot3) {
-                let el = match self.parse_spread_element()? {
-                    Expression::SpreadElement(spread_el) => spread_el,
-                    _ => unsafe { core::hint::unreachable_unchecked() },
-                };
+                let el = Box::new_in(self.parse_spread_element()?, self.arena);
 
                 properties.push(ObjectExpressionPropertyKind::SpreadElement(el));
             } else {
@@ -1565,18 +1568,28 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_function_arguments(&mut self) -> ParseResult<ArenaVec<'a, Expression<'a>>> {
+    pub fn parse_function_arguments(&mut self) -> ParseResult<ArenaVec<'a, FunctionArgument<'a>>> {
         let mut args = ArenaVec::new_in(self.arena);
 
         // skip (
         self.bump();
 
         while !matches!(self.token.kind, Kind::EOF | Kind::ParenC) {
+            let el;
+
             if self.kind(Kind::Dot3) {
-                args.push(self.parse_spread_element()?);
+                el = FunctionArgument::SpreadElement(Box::new_in(
+                    self.parse_spread_element()?,
+                    self.arena,
+                ))
             } else {
-                args.push(self.parse_assignment_expression()?);
+                el = FunctionArgument::Expression(Box::new_in(
+                    self.parse_assignment_expression()?,
+                    self.arena,
+                ));
             }
+
+            args.push(el);
 
             if !self.kind(Kind::ParenC) {
                 self.bump_token(Kind::Comma)?;
@@ -1588,7 +1601,7 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    pub fn parse_function_parameters(&mut self) -> ParseResult<ArenaVec<'a, FunctionParams<'a>>> {
+    pub fn parse_function_parameters(&mut self) -> ParseResult<ArenaVec<'a, FunctionParam<'a>>> {
         let mut params = ArenaVec::new_in(self.arena);
 
         // skip (
@@ -1598,13 +1611,11 @@ impl<'a> Parser<'a> {
             if self.kind(Kind::Dot3) {
                 let rest_el = self.parse_rest_element()?;
 
-                params.push(FunctionParams::RestElement(Box::new_in(
-                    rest_el, self.arena,
-                )));
+                params.push(FunctionParam::RestElement(Box::new_in(rest_el, self.arena)));
 
                 break;
             } else {
-                params.push(FunctionParams::Pattern(Box::new_in(
+                params.push(FunctionParam::Pattern(Box::new_in(
                     self.parse_pattern_with_default_value()?,
                     self.arena,
                 )));
@@ -1686,10 +1697,10 @@ impl<'a> Parser<'a> {
                     )))
                 }
             }
-            Kind::Number => Ok(self.parse_numeric_literal()),
+            Kind::Number => Ok(self.parse_numeric_literal_expression()),
             Kind::String => Ok(self.parse_string_literal_expression()),
-            Kind::Boolean => Ok(self.parse_boolean_literal()),
-            Kind::Null => Ok(self.parse_null_literal()),
+            Kind::Boolean => Ok(self.parse_boolean_literal_expression()),
+            Kind::Null => Ok(self.parse_null_literal_expression()),
             Kind::ParenO => self.parse_group_expression(),
             Kind::BracketO => self.parse_array_expression(),
             Kind::BracesO => self.parse_object_expression(),
@@ -1698,6 +1709,9 @@ impl<'a> Parser<'a> {
             Kind::Class => self.parse_class_expression(),
             Kind::Slash | Kind::SlashEqual => self.parse_regexp(),
             Kind::BackQuote => self.parse_template_literal(),
+            Kind::LessThan if self.extensions.jsx => {
+                todo!()
+            }
             _ => {
                 self.add_diagnostic("unexpected token", self.token.start..self.token.end);
                 Err(())
@@ -1731,7 +1745,7 @@ impl<'a> Parser<'a> {
                     self.bump();
 
                     let mut params = ArenaVec::new_in(self.arena);
-                    params.push(FunctionParams::Pattern(Box::new_in(
+                    params.push(FunctionParam::Pattern(Box::new_in(
                         self.reinterpret_as_pattern(exp)?,
                         self.arena,
                     )));
@@ -2029,7 +2043,7 @@ impl<'a> Parser<'a> {
         {
             let id = self.parse_identifier_pattern()?;
             let mut params = ArenaVec::new_in(self.arena);
-            params.push(FunctionParams::Pattern(Box::new_in(id, self.arena)));
+            params.push(FunctionParam::Pattern(Box::new_in(id, self.arena)));
 
             self.bump_token(Kind::Arrow)?;
 
@@ -2054,7 +2068,7 @@ impl<'a> Parser<'a> {
             let start = exp.start();
             let mut params = ArenaVec::new_in(self.arena);
 
-            params.push(FunctionParams::Pattern(Box::new_in(
+            params.push(FunctionParam::Pattern(Box::new_in(
                 self.reinterpret_as_pattern(exp)?,
                 self.arena,
             )));
@@ -3239,6 +3253,48 @@ pub fn is_identifier(kind: Kind) -> bool {
             | Kind::Constructor
             | Kind::Get
             | Kind::Set
+    )
+}
+
+pub fn is_reserved_keyword(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Break
+            | Kind::Case
+            | Kind::Catch
+            | Kind::Class
+            | Kind::Continue
+            | Kind::Const
+            | Kind::Debugger
+            | Kind::Delete
+            | Kind::Do
+            | Kind::Default
+            | Kind::Export
+            | Kind::Else
+            | Kind::Extends
+            | Kind::Function
+            | Kind::For
+            | Kind::Finally
+            | Kind::If
+            | Kind::In
+            | Kind::Instanceof
+            | Kind::Import
+            | Kind::Implements
+            | Kind::Let
+            | Kind::New
+            | Kind::Null
+            | Kind::Return
+            | Kind::Super
+            | Kind::Switch
+            | Kind::Static
+            | Kind::This
+            | Kind::Typeof
+            | Kind::Throw
+            | Kind::Try
+            | Kind::Var
+            | Kind::Void
+            | Kind::While
+            | Kind::With
     )
 }
 

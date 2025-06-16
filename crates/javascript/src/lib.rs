@@ -10,6 +10,7 @@ mod lookup_table;
 pub mod parser;
 pub mod tokenizer;
 mod typescript;
+mod jsx;
 
 #[derive(Debug, Clone)]
 pub enum DiagnosticError<'a> {

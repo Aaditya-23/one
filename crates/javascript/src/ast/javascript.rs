@@ -156,9 +156,16 @@ pub struct Import {
 }
 
 #[derive(Debug, CloneIn)]
+pub enum ArrayElement<'a> {
+    Elision(Box<'a, Elision>),
+    SpreadElement(Box<'a, SpreadElement<'a>>),
+    Expression(Box<'a, Expression<'a>>),
+}
+
+#[derive(Debug, CloneIn)]
 pub struct ArrayExpression<'a> {
     pub start: u32,
-    pub elements: Vec<'a, Expression<'a>>,
+    pub elements: Vec<'a, ArrayElement<'a>>,
     pub end: u32,
     pub parenthesized: bool,
 }
@@ -187,7 +194,7 @@ pub struct ObjectExpressionMethod<'a> {
     pub generator: bool,
     pub computed: bool,
     pub id: Expression<'a>,
-    pub params: Vec<'a, FunctionParams<'a>>,
+    pub params: Vec<'a, FunctionParam<'a>>,
     pub body: Block<'a>,
     pub type_parameters: Option<TsTypeParameterDeclaration<'a>>,
     pub kind: ObjectExpressionMethodKind,
@@ -428,7 +435,7 @@ pub struct ThisExpression {
 pub struct NewExpression<'a> {
     pub start: u32,
     pub callee: Expression<'a>,
-    pub arguments: Vec<'a, Expression<'a>>,
+    pub arguments: Vec<'a, FunctionArgument<'a>>,
     pub end: u32,
     pub parenthesized: bool,
 }
@@ -574,8 +581,6 @@ pub enum Expression<'a> {
     TaggedTemplateLiteral(Box<'a, TaggedTemplateLiteral<'a>>),
     AwaitExpression(Box<'a, AwaitExpression<'a>>),
     MetaProperty(Box<'a, MetaProperty<'a>>),
-    SpreadElement(Box<'a, SpreadElement<'a>>),
-    Elision(Box<'a, Elision>),
 
     // Typescript specific expressions
     TsInstantiationExpression(Box<'a, TsInstantiationExpression<'a>>),
@@ -599,7 +604,13 @@ pub struct Block<'a> {
 }
 
 #[derive(Debug, CloneIn)]
-pub enum FunctionParams<'a> {
+pub enum FunctionArgument<'a> {
+    Expression(Box<'a, Expression<'a>>),
+    SpreadElement(Box<'a, SpreadElement<'a>>),
+}
+
+#[derive(Debug, CloneIn)]
+pub enum FunctionParam<'a> {
     Pattern(Box<'a, Pattern<'a>>),
     RestElement(Box<'a, RestElement<'a>>),
 }
@@ -610,7 +621,7 @@ pub struct Function<'a> {
     pub async_: bool,
     pub generator: bool,
     pub id: Option<Identifier<'a>>,
-    pub params: Vec<'a, FunctionParams<'a>>,
+    pub params: Vec<'a, FunctionParam<'a>>,
     pub body: Block<'a>,
     pub type_parameters: Option<TsTypeParameterDeclaration<'a>>,
     pub end: u32,
@@ -626,7 +637,7 @@ pub enum ArrowFunctionBody<'a> {
 pub struct ArrowFunction<'a> {
     pub start: u32,
     pub async_: bool,
-    pub params: Vec<'a, FunctionParams<'a>>,
+    pub params: Vec<'a, FunctionParam<'a>>,
     pub body: ArrowFunctionBody<'a>,
     pub expression: bool,
     pub end: u32,
@@ -648,7 +659,7 @@ pub struct ClassMethod<'a> {
     pub generator: bool,
     pub async_: bool,
     pub key: Expression<'a>,
-    pub params: Vec<'a, FunctionParams<'a>>,
+    pub params: Vec<'a, FunctionParam<'a>>,
     pub body: Block<'a>,
     pub kind: MethodDefinitionKind,
     pub end: u32,
@@ -778,7 +789,7 @@ pub struct MetaProperty<'a> {
 pub struct CallExpression<'a> {
     pub start: u32,
     pub callee: Expression<'a>,
-    pub arguments: Vec<'a, Expression<'a>>,
+    pub arguments: Vec<'a, FunctionArgument<'a>>,
     pub optional: bool,
     pub end: u32,
 }

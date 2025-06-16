@@ -177,4 +177,7 @@ pub enum Kind {
     Keyof,
     Readonly,
     Implements,
+
+    //  JSX
+    JSXText,
 }

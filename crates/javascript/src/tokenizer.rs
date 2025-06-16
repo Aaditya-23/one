@@ -31,6 +31,7 @@ impl Token {
 pub enum LexContext {
     Normal,
     Template,
+    JSXChild,
 }
 
 #[derive(Debug, Clone)]
@@ -290,7 +291,7 @@ impl<'a> Tokenizer<'a> {
         Some((pattern_end, flag))
     }
 
-    pub fn lex_template_literal(&mut self) -> Kind {
+    fn lex_template_literal(&mut self) -> Kind {
         let start = self.index;
         let mut is_escaped = false;
 
@@ -353,6 +354,75 @@ impl<'a> Tokenizer<'a> {
             }
 
             is_escaped = false;
+        }
+    }
+
+    fn lex_jsx_child(&mut self) -> Kind {
+        let start = self.index;
+
+        let ch = unsafe { self.get_byte() };
+
+        match ch {
+            b'{' => self.eat_byte(Kind::BracesO),
+            b'<' => self.eat_byte(Kind::LessThan),
+            _ => {
+                while let Some(ch) = self.byte_at(0) {
+                    match ch {
+                        b'{' | b'<' => break,
+                        b'}' => {
+                            self.add_diagnostic("did you mean {'}'} ?", start..self.index);
+                            return Kind::Error;
+                        }
+                        b'>' => {
+                            self.add_diagnostic("did you mean {'>'} ?", start..self.index);
+                            return Kind::Error;
+                        }
+                        ch => {
+                            if ch.is_ascii() {
+                                if ch == b'\n' {
+                                    self.line_number += 1;
+                                } else if ch == b'\r' {
+                                    if let Some(b'\n') = self.byte_at(1) {
+                                        self.advance(1);
+                                    }
+
+                                    self.line_number += 1;
+                                }
+
+                                self.advance(1);
+                            } else {
+                                let ch = unsafe { self.get_utf8_char() };
+
+                                if ch == '\u{2028}' || ch == '\u{2029}' {
+                                    self.line_number += 1;
+                                }
+
+                                self.index += ch.len_utf8();
+                            }
+                        }
+                    }
+                }
+
+                Kind::JSXText
+            }
+        }
+    }
+
+    pub fn relex_jsx_child(&mut self, token: Token) -> Token {
+        if token.kind == Kind::EOF {
+            return token;
+        }
+
+        let start = token.start;
+
+        self.index = start as usize;
+        let kind = self.lex_jsx_child();
+
+        Token {
+            start,
+            kind,
+            is_on_new_line: token.is_on_new_line,
+            end: self.index as u32,
         }
     }
 
@@ -695,6 +765,53 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    pub fn relex_binary_op(&mut self, token: Token) -> Token {
+        let start = token.start;
+
+        if token.kind != Kind::GreaterThan {
+            return token;
+        }
+
+        let kind = match self.byte_at(0) {
+            Some(b'>') => {
+                self.advance(1);
+
+                match self.byte_at(0) {
+                    Some(b'>') => {
+                        self.advance(1);
+
+                        match self.byte_at(0) {
+                            Some(b'=') => {
+                                self.advance(1);
+
+                                Kind::UnsignedRightShiftEqual
+                            }
+                            _ => Kind::UnsignedRightShift,
+                        }
+                    }
+                    Some(b'=') => {
+                        self.advance(1);
+
+                        Kind::RightShiftEqual
+                    }
+                    _ => Kind::RightShift,
+                }
+            }
+            Some(b'=') => {
+                self.advance(1);
+                Kind::GreaterThanOrEqual
+            }
+            _ => return token,
+        };
+
+        Token {
+            start,
+            kind,
+            is_on_new_line: token.is_on_new_line,
+            end: self.index as u32,
+        }
+    }
+
     fn resolve_equal(&mut self) -> Kind {
         match self.next_byte() {
             Some(b'=') => {
@@ -942,17 +1059,20 @@ impl<'a> Tokenizer<'a> {
 
     pub fn lex(&mut self, ctx: LexContext) -> Token {
         let start;
-        let prev_line_number = self.line_number;
-        let (kind, end);
+        let (kind, end, is_on_new_line);
 
         if self.index >= self.code.len() {
-            kind = Kind::EOF;
             start = self.index;
+            kind = Kind::EOF;
+            is_on_new_line = false;
             end = start + 1;
         } else {
             match ctx {
                 LexContext::Normal => {
+                    let prev_line_number = self.line_number;
                     self.consume_whitespaces_and_newline();
+
+                    is_on_new_line = self.line_number != prev_line_number;
 
                     if self.index >= self.code.len() {
                         kind = Kind::EOF;
@@ -968,6 +1088,14 @@ impl<'a> Tokenizer<'a> {
                 LexContext::Template => {
                     start = self.index;
                     kind = self.lex_template_literal();
+                    is_on_new_line = false;
+                    end = self.index;
+                }
+
+                LexContext::JSXChild => {
+                    start = self.index;
+                    kind = self.lex_jsx_child();
+                    is_on_new_line = false;
                     end = self.index;
                 }
             }
@@ -975,7 +1103,7 @@ impl<'a> Tokenizer<'a> {
 
         Token {
             kind,
-            is_on_new_line: prev_line_number != self.line_number,
+            is_on_new_line,
             start: start as u32,
             end: end as u32,
         }
