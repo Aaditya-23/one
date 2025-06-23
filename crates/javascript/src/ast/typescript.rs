@@ -1,11 +1,11 @@
 use crate::{
     allocator::CloneIn,
-    ast::javascript::{BooleanLiteral, NullLiteral, NumericLiteral, StringLiteral},
+    ast::javascript::{BooleanLiteral, FunctionParam, NullLiteral, NumericLiteral, StringLiteral},
 };
 use bumpalo::{boxed::Box, collections::Vec, Bump};
 use macros::{CloneIn, Location};
 
-use super::javascript::{Expression, FunctionParams, Identifier, Location, MemberExpression};
+use super::javascript::{Expression, Identifier, Location, MemberExpression};
 
 #[derive(Debug, CloneIn)]
 pub struct TsTypeIdentifier {
@@ -47,7 +47,7 @@ pub struct TsMethodSignature<'a> {
     pub start: u32,
     pub key: Expression<'a>,
     pub type_annotation: Option<TsTypeAnnotation<'a>>,
-    pub params: Vec<'a, FunctionParams<'a>>,
+    pub params: Vec<'a, FunctionParam<'a>>,
     pub type_parameters: Option<TsTypeParameterDeclaration<'a>>,
     pub computed: bool,
     pub optional: bool,
@@ -252,5 +252,13 @@ pub struct TsSatisfiesExpression<'a> {
 pub struct TsNonNullExpression<'a> {
     pub start: u32,
     pub expression: Expression<'a>,
+    pub end: u32,
+}
+
+#[derive(Debug, CloneIn)]
+pub struct TsTypeAssertion<'a> {
+    pub start: u32,
+    pub expression: Expression<'a>,
+    pub type_annotation: TsTypeAnnotation<'a>,
     pub end: u32,
 }

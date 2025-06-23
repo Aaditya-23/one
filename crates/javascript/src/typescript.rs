@@ -2,16 +2,19 @@ use bumpalo::{boxed::Box, collections::Vec, Bump};
 
 use crate::{
     ast::{
-        javascript::{Expression, Identifier, Location, MemberExpression, Statement},
+        javascript::{
+            BinaryOperator, Expression, Identifier, Location, MemberExpression, Statement,
+        },
         typescript::{
             IdentifierOrMemberExpression, IdentifierOrQualifiedName, TsAsExpression,
-            TsIndexedAccess, TsInterfaceDeclaration, TsInterfaceHeritage, TsMethodSignature,
-            TsNonNullExpression, TsPropertyMember, TsPropertySignature, TsSatisfiesExpression,
-            TsTypeAliasDeclaration, TsTypeAnnotation, TsTypeAny, TsTypeArray, TsTypeIdentifier,
-            TsTypeIntersection, TsTypeLiteral, TsTypeObjectLiteral, TsTypeOperator,
-            TsTypeOperatorKind, TsTypeParameter, TsTypeParameterArguments,
-            TsTypeParameterDeclaration, TsTypeParenthesized, TsTypeQualifiedName, TsTypeReference,
-            TsTypeTuple, TsTypeUndefined, TsTypeUnion,
+            TsIndexedAccess, TsInstantiationExpression, TsInterfaceDeclaration,
+            TsInterfaceHeritage, TsMethodSignature, TsNonNullExpression, TsPropertyMember,
+            TsPropertySignature, TsSatisfiesExpression, TsTypeAliasDeclaration, TsTypeAnnotation,
+            TsTypeAny, TsTypeArray, TsTypeAssertion, TsTypeIdentifier, TsTypeIntersection,
+            TsTypeLiteral, TsTypeObjectLiteral, TsTypeOperator, TsTypeOperatorKind,
+            TsTypeParameter, TsTypeParameterArguments, TsTypeParameterDeclaration,
+            TsTypeParenthesized, TsTypeQualifiedName, TsTypeReference, TsTypeTuple,
+            TsTypeUndefined, TsTypeUnion,
         },
     },
     kind::Kind,
@@ -19,9 +22,31 @@ use crate::{
 };
 
 impl<'a> Parser<'a> {
-    // pub fn can_follow_type_arguments_in_exp(&self) -> bool {
+    pub fn can_follow_type_arguments_in_exp(&self) -> bool {
+        match self.token.kind {
+            Kind::ParenO | Kind::BackQuote | Kind::EOF => true,
+            Kind::LessThan | Kind::GreaterThan | Kind::Plus | Kind::Minus => false,
+            kind => {
+                self.token.is_on_new_line
+                    || BinaryOperator::from(kind).is_some()
+                    || self.is_start_of_exp()
+            }
+        }
+    }
 
-    // }
+    pub fn parse_type_parameter_arguments_in_exp(
+        &mut self,
+    ) -> Option<TsTypeParameterArguments<'a>> {
+        let Ok(type_parameter_arguments) = self.parse_type_parameter_arguments() else {
+            return None;
+        };
+
+        if self.can_follow_type_arguments_in_exp() {
+            Some(type_parameter_arguments)
+        } else {
+            None
+        }
+    }
 
     pub fn parse_type_identifier(&mut self) -> TsTypeIdentifier {
         let start = self.token.start;
@@ -813,6 +838,28 @@ impl<'a> Parser<'a> {
             },
             self.arena,
         ))
+    }
+
+    pub fn parse_ts_type_assertion_exp(&mut self) -> ParseResult<Expression<'a>> {
+        let start = self.token.start;
+
+        // skip <
+        self.bump();
+
+        let type_annotation = self.parse_type_annotation()?;
+
+        self.bump_token(Kind::GreaterThan)?;
+        let exp = self.parse_unary_expression()?;
+
+        Ok(Expression::TsTypeAssertionExpression(Box::new_in(
+            TsTypeAssertion {
+                start,
+                expression: exp,
+                type_annotation,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        )))
     }
 
     pub fn parse_type(&mut self) -> ParseResult<TsTypeAnnotation<'a>> {

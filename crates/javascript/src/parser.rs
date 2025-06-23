@@ -30,7 +30,7 @@ use crate::{
         typescript::TsInstantiationExpression,
     },
     kind::Kind,
-    tokenizer::{LexContext, Token, Tokenizer},
+    tokenizer::{LexContext, LexerState, Token, Tokenizer},
     DiagnosticError, ParserDiagnostics,
 };
 
@@ -60,6 +60,13 @@ pub struct Extensions {
     pub jsx: bool,
 }
 
+pub struct ParserState {
+    pub lexer: LexerState,
+    pub token: Token,
+    pub prev_token_end: u32,
+    pub in_paren: bool,
+}
+
 pub struct Parser<'a> {
     code: &'a str,
     pub(crate) lexer: Tokenizer<'a>,
@@ -72,6 +79,22 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    pub fn capture_state(&self) -> ParserState {
+        ParserState {
+            lexer: self.lexer.capture_state(),
+            token: self.token.clone(),
+            prev_token_end: self.prev_token_end,
+            in_paren: self.in_paren,
+        }
+    }
+
+    pub fn restore_from_state(&mut self, state: ParserState) {
+        self.lexer.restore_from_state(state.lexer);
+        self.token = state.token;
+        self.prev_token_end = state.prev_token_end;
+        self.in_paren = state.in_paren;
+    }
+
     pub fn bump(&mut self) {
         self.prev_token_end = self.token.end;
         self.token = self.lexer.lex(LexContext::Normal);
@@ -162,38 +185,20 @@ impl<'a> Parser<'a> {
         kind
     }
 
-    pub fn get_unary_operator(&self) -> Option<UnaryOperator> {
-        match self.token.kind {
-            Kind::Plus => Some(UnaryOperator::Plus),
-            Kind::Minus => Some(UnaryOperator::Minus),
-            Kind::Tilde => Some(UnaryOperator::Tilde),
-            Kind::Bang => Some(UnaryOperator::Bang),
-            Kind::Typeof => Some(UnaryOperator::Typeof),
-            Kind::Void => Some(UnaryOperator::Void),
-            Kind::Delete => Some(UnaryOperator::Delete),
-            _ => None,
+    pub fn try_parse_or_rewind<T>(
+        &mut self,
+        func: impl FnOnce(&mut Self) -> Option<T>,
+    ) -> Option<T> {
+        let state = self.capture_state();
+
+        let result = func(self);
+
+        if result.is_none() {
+            self.restore_from_state(state);
+            None
+        } else {
+            result
         }
-    }
-
-    pub fn get_assignment_operator(&self, kind: Kind) -> Option<AssignmentOperator> {
-        let op = match kind {
-            Kind::Equal => AssignmentOperator::Equal,
-            Kind::StarEqual => AssignmentOperator::Multiply,
-            Kind::Star2Equal => AssignmentOperator::Exponentiation,
-            Kind::SlashEqual => AssignmentOperator::Divide,
-            Kind::ModEqual => AssignmentOperator::Mod,
-            Kind::PlusEqual => AssignmentOperator::Plus,
-            Kind::MinusEqual => AssignmentOperator::Minus,
-            Kind::LeftShiftEqual => AssignmentOperator::LeftShift,
-            Kind::RightShiftEqual => AssignmentOperator::RightShift,
-            Kind::UnsignedRightShiftEqual => AssignmentOperator::UnsignedRightShift,
-            Kind::AmpersandEqual => AssignmentOperator::BitwiseAND,
-            Kind::PipeEqual => AssignmentOperator::BitwiseOR,
-            Kind::CaretEqual => AssignmentOperator::BitwiseXOR,
-            _ => return None,
-        };
-
-        Some(op)
     }
 
     pub fn is_curr_token_identifier(&self) -> bool {
@@ -202,6 +207,42 @@ impl<'a> Parser<'a> {
 
     pub fn is_curr_token_a_reserved_keyword(&self) -> bool {
         is_reserved_keyword(self.token.kind)
+    }
+
+    pub fn is_start_of_exp(&self) -> bool {
+        // todo: add yield and #
+        match self.token.kind {
+            Kind::Bang
+            | Kind::ParenO
+            | Kind::BracketO
+            | Kind::BracesO
+            | Kind::Plus2
+            | Kind::Minus2
+            | Kind::Tilde
+            | Kind::Plus
+            | Kind::Minus
+            | Kind::Throw
+            | Kind::New
+            | Kind::Typeof
+            | Kind::Void
+            | Kind::Delete
+            | Kind::Dot3
+            | Kind::This
+            | Kind::Function
+            | Kind::Class
+            | Kind::Import
+            | Kind::Super
+            | Kind::LessThan
+            | Kind::Slash
+            | Kind::SlashEqual
+            | Kind::BackQuote
+            | Kind::Boolean
+            | Kind::Number
+            | Kind::String
+            | Kind::Null => true,
+            kind if is_identifier(kind) => true,
+            _ => false,
+        }
     }
 
     pub fn parse_identifier(&mut self) -> Identifier<'a> {
@@ -438,73 +479,86 @@ impl<'a> Parser<'a> {
         match exp {
             Expression::Identifier(id) => Ok(Pattern::Identifier(id)),
             Expression::ArrayExpression(array) => {
+                let array = Box::into_inner(array);
+
                 let mut elements = ArenaVec::new_in(self.arena);
-                for el in array.elements.iter() {
+
+                let (start, end) = (array.start, array.end);
+
+                for el in array.elements.into_iter() {
                     match el {
-                        Expression::Elision(_) => elements.push(None),
-                        Expression::SpreadElement(inner) => {
+                        ArrayElement::Elision(_) => elements.push(None),
+                        ArrayElement::SpreadElement(inner) => {
+                            let spread_el = Box::into_inner(inner);
+
+                            let argument = self.reinterpret_as_pattern(spread_el.argument)?;
+
                             let array_pattern = ArrayPatternKind::RestElement(Box::new_in(
                                 RestElement {
-                                    start: inner.start,
-                                    argument: self.reinterpret_as_pattern(
-                                        inner.argument.clone_in(self.arena),
-                                    )?,
-                                    end: inner.end,
+                                    start: spread_el.start,
+                                    argument,
+                                    end: spread_el.end,
                                 },
                                 self.arena,
                             ));
 
                             elements.push(Some(array_pattern))
                         }
-                        _ => elements.push(Some(ArrayPatternKind::Pattern(Box::new_in(
-                            self.reinterpret_as_pattern(el.clone_in(self.arena))?,
-                            self.arena,
-                        )))),
+                        ArrayElement::Expression(exp) => {
+                            let exp = Box::into_inner(exp);
+
+                            elements.push(Some(ArrayPatternKind::Pattern(Box::new_in(
+                                self.reinterpret_as_pattern(exp)?,
+                                self.arena,
+                            ))))
+                        }
                     }
                 }
 
                 Ok(Pattern::ArrayPattern(Box::new_in(
                     ArrayPattern {
-                        start: array.start,
+                        start,
                         elements,
-                        // todo: check type annotation later
                         type_annotation: None,
-                        end: array.end,
+                        end,
                     },
                     self.arena,
                 )))
             }
-            Expression::ObjectExpression(object) => {
+            Expression::ObjectExpression(inner) => {
+                let object = Box::into_inner(inner);
+
                 let mut properties = ArenaVec::new_in(self.arena);
 
-                for property in object.properties.iter() {
+                for property in object.properties.into_iter() {
                     let object_pattern_property = match property {
-                        ObjectExpressionPropertyKind::SpreadElement(spread_el) => {
+                        ObjectExpressionPropertyKind::SpreadElement(inner) => {
+                            let spread_el = Box::into_inner(inner);
+
                             ObjectPatternPropertyKind::RestElement(Box::new_in(
                                 RestElement {
                                     start: spread_el.start,
-                                    argument: self.reinterpret_as_pattern(
-                                        spread_el.argument.clone_in(self.arena),
-                                    )?,
+                                    argument: self.reinterpret_as_pattern(spread_el.argument)?,
                                     end: spread_el.end,
                                 },
                                 self.arena,
                             ))
                         }
-                        ObjectExpressionPropertyKind::Method(_) => {
-                            self.add_diagnostic("invalid token", self.token.range());
+                        ObjectExpressionPropertyKind::Method(inner) => {
+                            self.add_diagnostic("invalid token", inner.start..inner.end);
+
                             return Err(());
                         }
-                        ObjectExpressionPropertyKind::Property(property) => {
+                        ObjectExpressionPropertyKind::Property(inner) => {
+                            let property = Box::into_inner(inner);
+
                             ObjectPatternPropertyKind::Property(Box::new_in(
                                 ObjectPatternProperty {
                                     start: property.start,
                                     computed: property.computed,
                                     shorthand: property.shorthand,
-                                    key: property.key.clone_in(self.arena),
-                                    value: self.reinterpret_as_pattern(
-                                        property.value.clone_in(self.arena),
-                                    )?,
+                                    key: property.key,
+                                    value: self.reinterpret_as_pattern(property.value)?,
                                     end: property.end,
                                 },
                                 self.arena,
@@ -519,7 +573,6 @@ impl<'a> Parser<'a> {
                     ObjectPattern {
                         start: object.start,
                         properties,
-                        // todo: check type annotation later
                         type_annotation: None,
                         end: object.end,
                     },
@@ -527,13 +580,13 @@ impl<'a> Parser<'a> {
                 )))
             }
             Expression::AssignmentExpression(exp) => {
+                let exp = Box::into_inner(exp);
                 let start = exp.start;
-                let left = match &exp.left {
-                    AssignmentExpressionLHS::Pattern(pattern) => {
-                        pattern.as_ref().clone_in(self.arena)
-                    }
-                    AssignmentExpressionLHS::Expression(expression) => {
-                        self.reinterpret_as_pattern(expression.as_ref().clone_in(self.arena))?
+                let left = match exp.left {
+                    AssignmentExpressionLHS::Pattern(pattern) => Box::into_inner(pattern),
+                    AssignmentExpressionLHS::Expression(exp) => {
+                        let exp = Box::into_inner(exp);
+                        self.reinterpret_as_pattern(exp)?
                     }
                 };
 
@@ -541,14 +594,14 @@ impl<'a> Parser<'a> {
                     AssignmentPattern {
                         start,
                         left,
-                        right: exp.right.clone_in(self.arena),
+                        right: exp.right,
                         end: exp.end,
                     },
                     self.arena,
                 )))
             }
             _ => {
-                self.add_diagnostic("invalid expression", self.token.range());
+                self.add_diagnostic("invalid expression", exp.start()..self.token.end);
                 return Err(());
             }
         }
@@ -622,44 +675,12 @@ impl<'a> Parser<'a> {
         self.bump();
 
         if self.kind(Kind::ParenC) {
-            self.bump();
-            self.bump_token(Kind::Arrow)?;
+            self.add_diagnostic(
+                "parenthesized expression cannot be empty",
+                start..self.token.end,
+            );
 
-            let (body, is_exp) = self.parse_arrow_function_body()?;
-
-            Ok(Expression::ArrowFunctionExpression(Box::new_in(
-                ArrowFunction {
-                    start,
-                    async_: false,
-                    expression: is_exp,
-                    params: ArenaVec::new_in(self.arena),
-                    body,
-                    end: self.prev_token_end,
-                },
-                self.arena,
-            )))
-        } else if self.kind(Kind::Dot3) {
-            let rest_el = self.parse_rest_element()?;
-            let mut params = ArenaVec::new_in(self.arena);
-
-            params.push(FunctionParam::RestElement(Box::new_in(rest_el, self.arena)));
-
-            self.bump_token(Kind::ParenC)?;
-            self.bump_token(Kind::Arrow)?;
-
-            let (body, is_exp) = self.parse_arrow_function_body()?;
-
-            Ok(Expression::ArrowFunctionExpression(Box::new_in(
-                ArrowFunction {
-                    start,
-                    async_: false,
-                    expression: is_exp,
-                    params,
-                    body,
-                    end: self.prev_token_end,
-                },
-                self.arena,
-            )))
+            Err(())
         } else {
             self.in_paren = true;
             let exp = self.parse_assignment_expression()?;
@@ -669,114 +690,26 @@ impl<'a> Parser<'a> {
 
                 while !matches!(self.token.kind, Kind::EOF | Kind::ParenC) {
                     self.bump_token(Kind::Comma)?;
-
-                    if self.kind(Kind::Dot3) {
-                        let rest_element = self.parse_rest_element()?;
-                        self.bump_token(Kind::ParenC)?;
-                        self.bump_token(Kind::Arrow)?;
-
-                        let mut params = ArenaVec::new_in(self.arena);
-
-                        for exp in expressions.into_iter() {
-                            params.push(FunctionParam::Pattern(Box::new_in(
-                                self.reinterpret_as_pattern(exp)?,
-                                self.arena,
-                            )))
-                        }
-
-                        params.push(FunctionParam::RestElement(Box::new_in(
-                            rest_element,
-                            self.arena,
-                        )));
-
-                        let (body, is_exp) = self.parse_arrow_function_body()?;
-
-                        self.in_paren = false;
-
-                        return Ok(Expression::ArrowFunctionExpression(Box::new_in(
-                            ArrowFunction {
-                                start,
-                                async_: false,
-                                expression: is_exp,
-                                params,
-                                body,
-                                end: self.prev_token_end,
-                            },
-                            self.arena,
-                        )));
-                    } else {
-                        expressions.push(self.parse_assignment_expression()?);
-                    }
+                    expressions.push(self.parse_assignment_expression()?);
                 }
 
                 self.bump_token(Kind::ParenC)?;
                 self.in_paren = false;
 
-                if self.kind(Kind::Arrow) {
-                    self.bump();
-
-                    let mut params = ArenaVec::new_in(self.arena);
-
-                    for exp in expressions.into_iter() {
-                        params.push(FunctionParam::Pattern(Box::new_in(
-                            self.reinterpret_as_pattern(exp)?,
-                            self.arena,
-                        )))
-                    }
-
-                    let (body, expression) = self.parse_arrow_function_body()?;
-
-                    Ok(Expression::ArrowFunctionExpression(Box::new_in(
-                        ArrowFunction {
-                            start,
-                            async_: false,
-                            expression,
-                            params,
-                            body,
-                            end: self.prev_token_end,
-                        },
-                        self.arena,
-                    )))
-                } else {
-                    Ok(Expression::SequenceExpression(Box::new_in(
-                        SequenceExpression {
-                            start,
-                            expressions,
-                            end: self.prev_token_end,
-                            parenthesized: true,
-                        },
-                        self.arena,
-                    )))
-                }
+                Ok(Expression::SequenceExpression(Box::new_in(
+                    SequenceExpression {
+                        start,
+                        expressions,
+                        end: self.prev_token_end,
+                        parenthesized: true,
+                    },
+                    self.arena,
+                )))
             } else {
                 self.bump_token(Kind::ParenC)?;
                 self.in_paren = false;
 
-                if self.kind(Kind::Arrow) {
-                    self.bump();
-
-                    let mut params = ArenaVec::new_in(self.arena);
-                    params.push(FunctionParam::Pattern(Box::new_in(
-                        self.reinterpret_as_pattern(exp)?,
-                        self.arena,
-                    )));
-
-                    let (body, is_exp) = self.parse_arrow_function_body()?;
-
-                    Ok(Expression::ArrowFunctionExpression(Box::new_in(
-                        ArrowFunction {
-                            start,
-                            async_: false,
-                            expression: is_exp,
-                            params,
-                            body,
-                            end: self.prev_token_end,
-                        },
-                        self.arena,
-                    )))
-                } else {
-                    Ok(exp)
-                }
+                Ok(exp)
             }
         }
     }
@@ -1710,8 +1643,20 @@ impl<'a> Parser<'a> {
             Kind::Slash | Kind::SlashEqual => self.parse_regexp(),
             Kind::BackQuote => self.parse_template_literal(),
             Kind::LessThan if self.extensions.jsx => {
-                todo!()
+                let peeked_token = self.lexer.peek(LexContext::Normal).kind;
+                if peeked_token == Kind::GreaterThan {
+                    Ok(Expression::JSXFragment(Box::new_in(
+                        self.parse_jsx_fragment()?,
+                        self.arena,
+                    )))
+                } else {
+                    Ok(Expression::JSXElement(Box::new_in(
+                        self.parse_jsx_element()?,
+                        self.arena,
+                    )))
+                }
             }
+            Kind::LessThan if self.extensions.ts => self.parse_ts_type_assertion_exp(),
             _ => {
                 self.add_diagnostic("unexpected token", self.token.start..self.token.end);
                 Err(())
@@ -1720,8 +1665,6 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_lhs_expression(&mut self) -> ParseResult<Expression<'a>> {
-        let (maybe_async, prev_line_number) = (self.kind(Kind::Async), self.lexer.line_number);
-
         let mut exp = match self.token.kind {
             Kind::Super => self.parse_super(),
             Kind::New => self.parse_new_expression(),
@@ -1738,43 +1681,17 @@ impl<'a> Parser<'a> {
 
             if self.kind(Kind::ParenO) {
                 let func_arguments = self.parse_function_arguments()?;
-                let is_async = maybe_async && (prev_line_number == self.lexer.line_number);
 
-                if self.kind(Kind::Arrow) {
-                    let start = exp.start();
-                    self.bump();
-
-                    let mut params = ArenaVec::new_in(self.arena);
-                    params.push(FunctionParam::Pattern(Box::new_in(
-                        self.reinterpret_as_pattern(exp)?,
-                        self.arena,
-                    )));
-
-                    let (body, is_exp) = self.parse_arrow_function_body()?;
-
-                    exp = Expression::ArrowFunctionExpression(Box::new_in(
-                        ArrowFunction {
-                            start,
-                            async_: is_async,
-                            expression: is_exp,
-                            params,
-                            body,
-                            end: self.prev_token_end,
-                        },
-                        self.arena,
-                    ));
-                } else {
-                    exp = Expression::CallExpression(Box::new_in(
-                        CallExpression {
-                            start: exp.start(),
-                            callee: exp,
-                            arguments: func_arguments,
-                            optional: is_optional,
-                            end: self.prev_token_end,
-                        },
-                        self.arena,
-                    ))
-                }
+                exp = Expression::CallExpression(Box::new_in(
+                    CallExpression {
+                        start: exp.start(),
+                        callee: exp,
+                        arguments: func_arguments,
+                        optional: is_optional,
+                        end: self.prev_token_end,
+                    },
+                    self.arena,
+                ))
             } else if self.kind(Kind::BracketO) {
                 self.bump();
                 let property = self.parse_expression()?;
@@ -1827,9 +1744,11 @@ impl<'a> Parser<'a> {
                     self.arena,
                 ))
             } else if self.extensions.ts && self.kind(Kind::LessThan) {
-                let type_parameter_arguments = self.parse_type_parameter_arguments()?;
-
-                // todo: add a check func to ensure that the type parameters are not a binary exp.
+                let Some(type_parameter_arguments) =
+                    self.try_parse_or_rewind(Self::parse_type_parameter_arguments_in_exp)
+                else {
+                    break;
+                };
 
                 exp = Expression::TsInstantiationExpression(Box::new_in(
                     TsInstantiationExpression {
@@ -1903,7 +1822,7 @@ impl<'a> Parser<'a> {
     pub fn parse_unary_expression(&mut self) -> ParseResult<Expression<'a>> {
         let start = self.token.start;
 
-        if let Some(operator) = self.get_unary_operator() {
+        if let Some(operator) = UnaryOperator::from(self.token.kind) {
             self.bump();
 
             Ok(Expression::UnaryExpression(Box::new_in(
@@ -1930,7 +1849,12 @@ impl<'a> Parser<'a> {
 
         stack.push((None, self.parse_unary_expression()?));
 
-        while let Some(op) = BinaryOperator::from(self.token.kind) {
+        loop {
+            self.token = self.lexer.relex_binary_op(self.token.clone());
+            let Some(op) = BinaryOperator::from(self.token.kind) else {
+                break;
+            };
+
             let (prev_op, _) = unsafe { stack.last().unwrap_unchecked() };
 
             let prev_precedence = if let Some(op) = prev_op {
@@ -2033,60 +1957,77 @@ impl<'a> Parser<'a> {
         Ok(exp)
     }
 
+    pub fn speculatively_parse_arrow_function(&mut self) -> Option<Expression<'a>> {
+        let start = self.token.start;
+
+        let is_async = if self.kind(Kind::Async) {
+            self.bump();
+            true
+        } else {
+            false
+        };
+
+        let type_parameters = if self.kind(Kind::LessThan) {
+            if !self.extensions.ts {
+                return None;
+            }
+
+            let Ok(type_params) = self.parse_type_parameter_declaration() else {
+                return None;
+            };
+
+            if !self.kind(Kind::ParenO) {
+                return None;
+            }
+
+            Some(type_params)
+        } else {
+            None
+        };
+
+        let params = if self.kind(Kind::ParenO) {
+            let Ok(params) = self.parse_function_parameters() else {
+                return None;
+            };
+
+            params
+        } else if self.is_curr_token_identifier() {
+            let ident = Pattern::Identifier(Box::new_in(self.parse_identifier(), self.arena));
+
+            bumpalo::vec![in self.arena;
+            FunctionParam::Pattern(Box::new_in(ident, self.arena))
+            ]
+        } else {
+            return None;
+        };
+
+        let Ok((body, is_exp)) = self.parse_arrow_function_body() else {
+            return None;
+        };
+
+        Some(Expression::ArrowFunctionExpression(Box::new_in(
+            ArrowFunction {
+                start,
+                async_: is_async,
+                params,
+                type_parameters,
+                body,
+                expression: is_exp,
+                end: self.prev_token_end,
+            },
+            self.arena,
+        )))
+    }
+
     pub fn parse_assignment_expression(&mut self) -> ParseResult<Expression<'a>> {
-        let (prev_kind, prev_line) = (self.token.kind, self.lexer.line_number);
-        let mut exp = self.parse_conditional_expression()?;
-
-        if prev_kind == Kind::Async
-            && prev_line == self.lexer.line_number
-            && self.kind(Kind::Identifier)
+        if let Some(arrow_exp) = self.try_parse_or_rewind(Self::speculatively_parse_arrow_function)
         {
-            let id = self.parse_identifier_pattern()?;
-            let mut params = ArenaVec::new_in(self.arena);
-            params.push(FunctionParam::Pattern(Box::new_in(id, self.arena)));
-
-            self.bump_token(Kind::Arrow)?;
-
-            let (body, expression) = self.parse_arrow_function_body()?;
-
-            return Ok(Expression::ArrowFunctionExpression(Box::new_in(
-                ArrowFunction {
-                    start: exp.start(),
-                    async_: true,
-                    params,
-                    body,
-                    expression,
-                    end: self.prev_token_end,
-                },
-                self.arena,
-            )));
+            return Ok(arrow_exp);
         }
 
-        if self.kind(Kind::Arrow) {
-            self.bump();
+        let mut exp = self.parse_conditional_expression()?;
 
-            let start = exp.start();
-            let mut params = ArenaVec::new_in(self.arena);
-
-            params.push(FunctionParam::Pattern(Box::new_in(
-                self.reinterpret_as_pattern(exp)?,
-                self.arena,
-            )));
-
-            let (body, is_exp) = self.parse_arrow_function_body()?;
-
-            exp = Expression::ArrowFunctionExpression(Box::new_in(
-                ArrowFunction {
-                    start,
-                    async_: false,
-                    expression: is_exp,
-                    params,
-                    body,
-                    end: self.prev_token_end,
-                },
-                self.arena,
-            ))
-        } else if let Some(operator) = self.get_assignment_operator(self.token.kind) {
+        if let Some(operator) = AssignmentOperator::from(self.token.kind) {
             let start = exp.start();
             self.bump();
 
@@ -2820,8 +2761,9 @@ impl<'a> Parser<'a> {
                 ForLoopInit::VariableDeclaration(v_declaration) => {
                     ForInLoopLeft::VariableDeclaration(v_declaration)
                 }
-                ForLoopInit::Expression(boxed_exp) => {
-                    let exp = boxed_exp.as_ref().clone_in(self.arena);
+                ForLoopInit::Expression(exp) => {
+                    let exp = Box::into_inner(exp);
+
                     ForInLoopLeft::Pattern(Box::new_in(
                         self.reinterpret_as_pattern(exp)?,
                         self.arena,

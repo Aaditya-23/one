@@ -6,7 +6,10 @@ use super::typescript::{
 };
 use crate::{
     allocator::CloneIn,
-    ast::typescript::{TsAsExpression, TsNonNullExpression, TsSatisfiesExpression},
+    ast::{
+        jsx::{JSXElement, JSXFragment},
+        typescript::{TsAsExpression, TsNonNullExpression, TsSatisfiesExpression, TsTypeAssertion},
+    },
     kind::Kind,
 };
 use bumpalo::{boxed::Box, collections::Vec, Bump};
@@ -391,6 +394,25 @@ impl<'a> AssignmentOperator {
             BitwiseXOR => "^=",
         }
     }
+
+    pub fn from(kind: Kind) -> Option<Self> {
+        Some(match kind {
+            Kind::Equal => AssignmentOperator::Equal,
+            Kind::StarEqual => AssignmentOperator::Multiply,
+            Kind::Star2Equal => AssignmentOperator::Exponentiation,
+            Kind::SlashEqual => AssignmentOperator::Divide,
+            Kind::ModEqual => AssignmentOperator::Mod,
+            Kind::PlusEqual => AssignmentOperator::Plus,
+            Kind::MinusEqual => AssignmentOperator::Minus,
+            Kind::LeftShiftEqual => AssignmentOperator::LeftShift,
+            Kind::RightShiftEqual => AssignmentOperator::RightShift,
+            Kind::UnsignedRightShiftEqual => AssignmentOperator::UnsignedRightShift,
+            Kind::AmpersandEqual => AssignmentOperator::BitwiseAND,
+            Kind::PipeEqual => AssignmentOperator::BitwiseOR,
+            Kind::CaretEqual => AssignmentOperator::BitwiseXOR,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug, CloneIn)]
@@ -490,6 +512,19 @@ impl<'a> UnaryOperator {
             Void => "void",
         }
     }
+
+    pub fn from(kind: Kind) -> Option<Self> {
+        Some(match kind {
+            Kind::Plus => UnaryOperator::Plus,
+            Kind::Minus => UnaryOperator::Minus,
+            Kind::Tilde => UnaryOperator::Tilde,
+            Kind::Bang => UnaryOperator::Bang,
+            Kind::Typeof => UnaryOperator::Typeof,
+            Kind::Void => UnaryOperator::Void,
+            Kind::Delete => UnaryOperator::Delete,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug, CloneIn)]
@@ -587,6 +622,11 @@ pub enum Expression<'a> {
     TsAsExpression(Box<'a, TsAsExpression<'a>>),
     TsSatisfiesExpression(Box<'a, TsSatisfiesExpression<'a>>),
     TsNonNullExpression(Box<'a, TsNonNullExpression<'a>>),
+    TsTypeAssertionExpression(Box<'a, TsTypeAssertion<'a>>),
+
+    // JSX specific expressions
+    JSXElement(Box<'a, JSXElement<'a>>),
+    JSXFragment(Box<'a, JSXFragment<'a>>),
 }
 
 #[derive(Debug, CloneIn)]
@@ -638,6 +678,7 @@ pub struct ArrowFunction<'a> {
     pub start: u32,
     pub async_: bool,
     pub params: Vec<'a, FunctionParam<'a>>,
+    pub type_parameters: Option<TsTypeParameterDeclaration<'a>>,
     pub body: ArrowFunctionBody<'a>,
     pub expression: bool,
     pub end: u32,

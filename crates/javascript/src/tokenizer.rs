@@ -34,6 +34,12 @@ pub enum LexContext {
     JSXChild,
 }
 
+pub struct LexerState {
+    pub index: usize,
+    pub line_number: u32,
+    pub diagnostic_len: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct Tokenizer<'a> {
     pub code: &'a str,
@@ -90,6 +96,20 @@ impl<'a> Tokenizer<'a> {
         } else {
             None
         }
+    }
+
+    pub fn capture_state(&self) -> LexerState {
+        LexerState {
+            index: self.index,
+            line_number: self.line_number,
+            diagnostic_len: self.diagnostics.len()
+        }
+    }
+
+    pub fn restore_from_state(&mut self, state: LexerState) {
+        self.index = state.index;
+        self.line_number = state.line_number;  
+        self.diagnostics.truncate(state.diagnostic_len); 
     }
 
     pub fn peek(&mut self, ctx: LexContext) -> Token {
