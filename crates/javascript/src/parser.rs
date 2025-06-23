@@ -3132,10 +3132,7 @@ impl<'a> Parser<'a> {
         if self.kind(Kind::Semicolon) {
             self.bump()
         } else if !self.token.is_on_new_line {
-            self.assert(
-                !self.kind(Kind::EOF) && !self.kind(Kind::BracesC),
-                "invalid token",
-            )?;
+            self.assert(self.kind(Kind::EOF), "invalid token")?;
         }
 
         statement
@@ -3247,22 +3244,31 @@ mod tests {
 
     #[test]
     fn test_parser() {
-        let code = read_to_string("../../data/input.js").unwrap();
+        let code = read_to_string("../../data/input.ts").unwrap();
         let arena = Bump::new();
 
-        let mut p = Parser::new(
+        let parser = Parser::new(
             &arena,
             code.as_str(),
             Extensions {
-                ts: true,
+                ts: false,
                 jsx: false,
             },
         );
 
-        let Program { ast, .. } = p.parse();
+        let Program {
+            ast,
+            fatal_error,
+            diagnostics,
+            ..
+        } = parser.parse();
 
-        for s in ast.iter() {
-            println!("{:#?}", s);
+        if fatal_error {
+            println!("Parser encountered a fatal error: {:?}", diagnostics);
+        } else {
+            for s in ast.iter() {
+                println!("{:#?}", s);
+            }
         }
     }
 
