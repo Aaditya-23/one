@@ -369,6 +369,8 @@ impl<'a> Parser<'a> {
             _ => unsafe { core::hint::unreachable_unchecked() },
         };
 
+        self.bump();
+
         let type_annotation = self.parse_type_annotation()?;
 
         Ok(TsTypeAnnotation::TypeOperator(Box::new_in(

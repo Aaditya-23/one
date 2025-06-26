@@ -5,12 +5,12 @@ use crate::kind::Kind;
 // pub mod nodes;
 mod allocator;
 pub mod ast;
+mod jsx;
 pub mod kind;
 mod lookup_table;
 pub mod parser;
 pub mod tokenizer;
 mod typescript;
-mod jsx;
 
 #[derive(Debug, Clone)]
 pub enum DiagnosticError<'a> {
@@ -22,6 +22,7 @@ pub enum DiagnosticError<'a> {
 pub struct ParserDiagnostics<'a> {
     pub error: DiagnosticError<'a>,
     pub position: Range<usize>,
+    pub line_number: u32,
 }
 
 // pub fn build_doc(code: String, options: Options) -> DocTree {

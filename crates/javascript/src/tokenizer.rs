@@ -53,6 +53,7 @@ impl<'a> Tokenizer<'a> {
         self.diagnostics.push(ParserDiagnostics {
             error: DiagnosticError::Other(message),
             position,
+            line_number: self.line_number,
         })
     }
 
@@ -102,14 +103,14 @@ impl<'a> Tokenizer<'a> {
         LexerState {
             index: self.index,
             line_number: self.line_number,
-            diagnostic_len: self.diagnostics.len()
+            diagnostic_len: self.diagnostics.len(),
         }
     }
 
     pub fn restore_from_state(&mut self, state: LexerState) {
         self.index = state.index;
-        self.line_number = state.line_number;  
-        self.diagnostics.truncate(state.diagnostic_len); 
+        self.line_number = state.line_number;
+        self.diagnostics.truncate(state.diagnostic_len);
     }
 
     pub fn peek(&mut self, ctx: LexContext) -> Token {

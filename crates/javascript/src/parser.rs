@@ -113,6 +113,7 @@ impl<'a> Parser<'a> {
                     found: self.token.kind,
                 },
                 position: self.token.start as usize..self.token.end as usize,
+                line_number: self.lexer.line_number,
             });
 
             return Err(());
@@ -127,6 +128,7 @@ impl<'a> Parser<'a> {
             self.lexer.diagnostics.push(ParserDiagnostics {
                 error: DiagnosticError::Other(message),
                 position: self.token.start as usize..self.token.end as usize,
+                line_number: self.lexer.line_number,
             });
 
             return Err(());
@@ -143,6 +145,7 @@ impl<'a> Parser<'a> {
                     found: self.token.kind,
                 },
                 position: self.token.start as usize..self.token.end as usize,
+                line_number: self.lexer.line_number,
             });
 
             return Err(());
@@ -159,6 +162,7 @@ impl<'a> Parser<'a> {
         self.lexer.diagnostics.push(ParserDiagnostics {
             error: DiagnosticError::Other(message),
             position: position.start as usize..position.end as usize,
+            line_number: self.lexer.line_number,
         });
     }
 
@@ -169,6 +173,7 @@ impl<'a> Parser<'a> {
                 found: self.token.kind,
             },
             position: self.token.start as usize..self.token.end as usize,
+            line_number: self.lexer.line_number,
         });
     }
 
@@ -1589,7 +1594,10 @@ impl<'a> Parser<'a> {
             None
         };
 
-        self.assert(!is_id_optional && id.is_none(), "function id is required")?;
+        if !is_id_optional && id.is_none() {
+            self.add_diagnostic("function id is required", start..self.token.end);
+            return Err(());
+        }
 
         let type_parameters = if self.extensions.ts && self.kind(Kind::LessThan) {
             Some(self.parse_type_parameter_declaration()?)
@@ -2000,6 +2008,10 @@ impl<'a> Parser<'a> {
         } else {
             return None;
         };
+
+        if self.bump_token(Kind::Arrow).is_err() {
+            return None;
+        }
 
         let Ok((body, is_exp)) = self.parse_arrow_function_body() else {
             return None;
@@ -3129,10 +3141,12 @@ impl<'a> Parser<'a> {
             _ => self.parse_labelled_statement(),
         };
 
-        if self.kind(Kind::Semicolon) {
-            self.bump()
-        } else if !self.token.is_on_new_line {
-            self.assert(self.kind(Kind::EOF), "invalid token")?;
+        if statement.is_ok() {
+            if self.kind(Kind::Semicolon) {
+                self.bump()
+            } else if !self.token.is_on_new_line {
+                self.assert(self.kind(Kind::EOF), "invalid token")?;
+            }
         }
 
         statement
@@ -3251,7 +3265,7 @@ mod tests {
             &arena,
             code.as_str(),
             Extensions {
-                ts: false,
+                ts: true,
                 jsx: false,
             },
         );
@@ -3264,7 +3278,22 @@ mod tests {
         } = parser.parse();
 
         if fatal_error {
-            println!("Parser encountered a fatal error: {:?}", diagnostics);
+            println!("Parser encountered {} fatal error", diagnostics.len());
+
+            for d in diagnostics {
+                let mut offset_range = d.position.clone();
+                offset_range.start = offset_range.start.abs_diff(15).max(0);
+                offset_range.end = (offset_range.end + 15).min(code.len());
+
+                println!("{}", unsafe {
+                    code.get_unchecked(offset_range.start..offset_range.end)
+                });
+
+                println!(
+                    "error on line: {}, {:#?}, {:#?}",
+                    d.line_number, d.error, d.position
+                );
+            }
         } else {
             for s in ast.iter() {
                 println!("{:#?}", s);
